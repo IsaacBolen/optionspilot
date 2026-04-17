@@ -1,1 +1,5 @@
-@import "tailwindcss";
+/* Base scan from project root so all App Router files (e.g. /dashboard) are included */
+@import "tailwindcss" source("..");
+
+/* Explicit app tree — belt-and-suspenders for content detection */
+@source "../app/**/*.{js,ts,jsx,tsx,mdx}";
