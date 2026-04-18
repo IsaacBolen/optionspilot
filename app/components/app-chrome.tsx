@@ -29,6 +29,7 @@ function AppHeader() {
   const pathname = usePathname();
   const dashboardActive = pathname === "/dashboard";
   const screenerActive = pathname === "/screener";
+  const positionsActive = pathname === "/positions";
 
   return (
     <header className="relative z-10 border-b border-zinc-800/80 bg-zinc-950/80 backdrop-blur-md">
@@ -61,12 +62,16 @@ function AppHeader() {
             >
               Screener
             </Link>
-            <span
-              className="cursor-not-allowed select-none rounded-lg px-2.5 py-1.5 text-sm font-medium text-zinc-600"
-              title="Coming soon"
+            <Link
+              href="/positions"
+              className={`rounded-lg px-2.5 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 ${
+                positionsActive
+                  ? "bg-emerald-500/10 text-emerald-200 ring-1 ring-emerald-500/25"
+                  : "text-zinc-400 hover:bg-white/[0.04] hover:text-emerald-200/90"
+              }`}
             >
               Positions
-            </span>
+            </Link>
             <span
               className="cursor-not-allowed select-none rounded-lg px-2.5 py-1.5 text-sm font-medium text-zinc-600"
               title="Coming soon"
