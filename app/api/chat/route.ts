@@ -17,8 +17,11 @@ Rules:
 - volume is an integer (contracts or share-equivalent style number).
 - signalScore is an integer 0-100.
 - expiration is a human-readable date string like "May 16, 2025".
-- estPremium is a number: realistic estimated price per contract in dollars (e.g. 2.45 means $2.45 per contract), consistent with strike, DTE, and IV.
-- premiumRange is a string like "$1.80 - $3.20" for a plausible bid/ask range based on strike, expiry, and IV.
+- estPremium is a number: realistic estimated premium **per share** (one option contract = 100 shares, so total contract cost in dollars = estPremium × 100). Example: estPremium 2.45 means $2.45/share ≈ $245 per contract. Keep it consistent with strike, DTE, and IV.
+- premiumRange is a string like "$1.80 - $3.20" for a plausible bid/ask range per share based on strike, expiry, and IV.
+- Budget / max cost: When the user gives a dollar amount as a budget or maximum cost (e.g. "under $150", "less than $200 per contract", "max $500"), treat that amount as **total contract cost** (premium × 100 shares), **not** per-share. Example: "under $150" means every pick must have estPremium ≤ 1.50 (because 1.50 × 100 = $150 total). "Less than $200 per contract" means estPremium < 2.00.
+- Always honor that budget: **never** output a pick where estPremium × 100 is greater than the user’s stated maximum. If the budget is tight, prefer cheaper strikes / shorter DTE / names that can fit—do not exceed the cap.
+- If the user does not mention a budget, choose realistic premiums for the tickers and structures you pick.
 
 Today's date is April 18, 2026. All expiration dates you generate must be in the future, after today's date.`;
 
