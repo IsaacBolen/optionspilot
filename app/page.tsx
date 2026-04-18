@@ -46,7 +46,7 @@ export default function Home() {
           </p>
           <div className="mt-10">
             <Link
-              href="/get-started"
+              href="/dashboard"
               className="inline-flex h-11 items-center justify-center rounded-full bg-emerald-500 px-8 text-sm font-semibold text-zinc-950 shadow-lg shadow-emerald-500/25 transition hover:bg-emerald-400"
             >
               Get Started

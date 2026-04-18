@@ -1,5 +1,13 @@
 import { DashboardClient } from "./dashboard-client";
 
-export default function DashboardPage() {
-  return <DashboardClient />;
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
+  const q = await searchParams;
+  const initialTab =
+    q.tab === "screener" ? ("screener" as const) : ("overview" as const);
+
+  return <DashboardClient initialTab={initialTab} />;
 }

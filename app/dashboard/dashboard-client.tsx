@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
 function RobotIcon({ className }: { className?: string }) {
   return (
@@ -147,10 +148,19 @@ const MOCK_POSITIONS = [
   },
 ];
 
-export function DashboardClient() {
+export function DashboardClient({
+  initialTab = "overview",
+}: {
+  initialTab?: "overview" | "screener";
+}) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<"overview" | "screener">(
-    "overview",
+    initialTab,
   );
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
   const [screenerFilter, setScreenerFilter] =
     useState<ScreenerFilter>("all");
 
@@ -210,13 +220,49 @@ export function DashboardClient() {
       </div>
 
       <header className="relative z-10 border-b border-zinc-800/80 bg-zinc-950/80 backdrop-blur-md">
-        <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-          <Link
-            href="/"
-            className="text-lg font-semibold tracking-tight text-white transition hover:text-emerald-200"
-          >
-            OptionsPilot
-          </Link>
+        <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-6">
+          <div className="flex min-w-0 flex-1 items-center gap-6 lg:gap-10">
+            <Link
+              href="/"
+              className="shrink-0 text-lg font-semibold tracking-tight text-white transition hover:text-emerald-200"
+            >
+              OptionsPilot
+            </Link>
+            <div className="flex flex-wrap items-center gap-x-0.5 gap-y-1 sm:gap-x-1">
+              <Link
+                href="/dashboard"
+                className={`rounded-lg px-2.5 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 ${
+                  activeTab === "overview"
+                    ? "bg-emerald-500/10 text-emerald-200 ring-1 ring-emerald-500/25"
+                    : "text-zinc-400 hover:bg-white/[0.04] hover:text-emerald-200/90"
+                }`}
+              >
+                Dashboard
+              </Link>
+              <Link
+                href="/dashboard?tab=screener"
+                className={`rounded-lg px-2.5 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 ${
+                  activeTab === "screener"
+                    ? "bg-emerald-500/10 text-emerald-200 ring-1 ring-emerald-500/25"
+                    : "text-zinc-400 hover:bg-white/[0.04] hover:text-emerald-200/90"
+                }`}
+              >
+                Screener
+              </Link>
+              <span
+                className="cursor-not-allowed select-none rounded-lg px-2.5 py-1.5 text-sm font-medium text-zinc-600"
+                title="Coming soon"
+              >
+                Positions
+              </span>
+              <span
+                className="cursor-not-allowed select-none rounded-lg px-2.5 py-1.5 text-sm font-medium text-zinc-600"
+                title="Coming soon"
+              >
+                AI Chat
+              </span>
+            </div>
+          </div>
           <button
             type="button"
             className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-zinc-300 transition hover:border-emerald-500/40 hover:bg-emerald-500/10 hover:text-emerald-200"
@@ -256,7 +302,15 @@ export function DashboardClient() {
                   ? "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-500/30"
                   : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
               }`}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => {
+                setActiveTab(tab.id);
+                router.replace(
+                  tab.id === "screener"
+                    ? "/dashboard?tab=screener"
+                    : "/dashboard",
+                  { scroll: false },
+                );
+              }}
             >
               {tab.label}
             </button>
