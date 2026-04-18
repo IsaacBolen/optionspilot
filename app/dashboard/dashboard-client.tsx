@@ -643,86 +643,6 @@ export function DashboardClient() {
 
         <section className="mb-8 overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm shadow-black/20 ring-1 ring-inset ring-white/5 backdrop-blur-sm">
           <div className="border-b border-zinc-800/80 px-5 py-4">
-            <h2 className="text-sm font-semibold text-white">News</h2>
-            <p className="mt-0.5 text-xs text-zinc-500">
-              {scopeDisplay} · up to 10 headlines (Finnhub, last 30 days)
-            </p>
-
-            {!newsLoading && sentiment && sentimentUi && (
-              <div
-                className={`mt-4 rounded-xl border bg-zinc-950/50 p-4 ${sentimentUi.ring}`}
-              >
-                <div className="flex flex-wrap items-center gap-3">
-                  <span
-                    className={`inline-flex items-center rounded-lg px-3 py-1.5 text-sm font-semibold tabular-nums ${sentimentUi.badge}`}
-                  >
-                    {sentiment.sentimentScore}
-                  </span>
-                  <span
-                    className={`rounded-md px-2.5 py-1 text-xs font-semibold uppercase tracking-wide ${sentimentUi.badge}`}
-                  >
-                    {sentiment.sentimentLabel}
-                  </span>
-                </div>
-                <p className="mt-3 text-sm leading-relaxed text-zinc-300">
-                  {sentiment.summary}
-                </p>
-              </div>
-            )}
-
-            {!newsLoading && sentimentWarning && (
-              <p className="mt-3 text-xs text-amber-400/90">{sentimentWarning}</p>
-            )}
-          </div>
-
-          <ul className="divide-y divide-white/5">
-            {newsLoading ? (
-              <li className="px-5 py-10 text-center text-sm text-zinc-500">
-                Loading headlines and sentiment…
-              </li>
-            ) : newsError ? (
-              <li className="px-5 py-8 text-center text-sm text-red-400/90">
-                {newsError}
-              </li>
-            ) : newsArticles.length === 0 ? (
-              <li className="px-5 py-8 text-center text-sm text-zinc-500">
-                No articles in this window. Try another ticker or later.
-              </li>
-            ) : (
-              newsArticles.map((item, i) => (
-                <li
-                  key={`${item.datetime}-${item.url}-${i}`}
-                  className="px-5 py-4"
-                >
-                  <div className="flex flex-wrap items-center gap-2 gap-y-1">
-                    <span className="rounded-md bg-zinc-800/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
-                      {item.source}
-                    </span>
-                    <span className="text-[11px] tabular-nums text-zinc-600">
-                      {formatTimeAgo(item.datetime)}
-                    </span>
-                  </div>
-                  <a
-                    href={item.url || "#"}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-2 block text-sm font-medium text-white transition hover:text-emerald-200/95"
-                  >
-                    {item.headline || "Untitled"}
-                  </a>
-                  {item.summary ? (
-                    <p className="mt-1.5 text-sm leading-relaxed text-zinc-500">
-                      {item.summary}
-                    </p>
-                  ) : null}
-                </li>
-              ))
-            )}
-          </ul>
-        </section>
-
-        <section className="overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm shadow-black/20 ring-1 ring-inset ring-white/5 backdrop-blur-sm">
-          <div className="border-b border-zinc-800/80 px-5 py-4">
             <h2 className="text-sm font-semibold text-white">Market overview</h2>
             <p className="mt-0.5 text-xs text-zinc-500">
               {marketFocusTicker
@@ -808,6 +728,86 @@ export function DashboardClient() {
               </div>
             )}
           </div>
+        </section>
+
+        <section className="mb-8 overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm shadow-black/20 ring-1 ring-inset ring-white/5 backdrop-blur-sm">
+          <div className="border-b border-zinc-800/80 px-5 py-4">
+            <h2 className="text-sm font-semibold text-white">News</h2>
+            <p className="mt-0.5 text-xs text-zinc-500">
+              {scopeDisplay} · up to 10 headlines (Finnhub, last 30 days)
+            </p>
+
+            {!newsLoading && sentiment && sentimentUi && (
+              <div
+                className={`mt-4 rounded-xl border bg-zinc-950/50 p-4 ${sentimentUi.ring}`}
+              >
+                <div className="flex flex-wrap items-center gap-3">
+                  <span
+                    className={`inline-flex items-center rounded-lg px-3 py-1.5 text-sm font-semibold tabular-nums ${sentimentUi.badge}`}
+                  >
+                    {sentiment.sentimentScore}
+                  </span>
+                  <span
+                    className={`rounded-md px-2.5 py-1 text-xs font-semibold uppercase tracking-wide ${sentimentUi.badge}`}
+                  >
+                    {sentiment.sentimentLabel}
+                  </span>
+                </div>
+                <p className="mt-3 text-sm leading-relaxed text-zinc-300">
+                  {sentiment.summary}
+                </p>
+              </div>
+            )}
+
+            {!newsLoading && sentimentWarning && (
+              <p className="mt-3 text-xs text-amber-400/90">{sentimentWarning}</p>
+            )}
+          </div>
+
+          <ul className="divide-y divide-white/5">
+            {newsLoading ? (
+              <li className="px-5 py-10 text-center text-sm text-zinc-500">
+                Loading headlines and sentiment…
+              </li>
+            ) : newsError ? (
+              <li className="px-5 py-8 text-center text-sm text-red-400/90">
+                {newsError}
+              </li>
+            ) : newsArticles.length === 0 ? (
+              <li className="px-5 py-8 text-center text-sm text-zinc-500">
+                No articles in this window. Try another ticker or later.
+              </li>
+            ) : (
+              newsArticles.map((item, i) => (
+                <li
+                  key={`${item.datetime}-${item.url}-${i}`}
+                  className="px-5 py-4"
+                >
+                  <div className="flex flex-wrap items-center gap-2 gap-y-1">
+                    <span className="rounded-md bg-zinc-800/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
+                      {item.source}
+                    </span>
+                    <span className="text-[11px] tabular-nums text-zinc-600">
+                      {formatTimeAgo(item.datetime)}
+                    </span>
+                  </div>
+                  <a
+                    href={item.url || "#"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-2 block text-sm font-medium text-white transition hover:text-emerald-200/95"
+                  >
+                    {item.headline || "Untitled"}
+                  </a>
+                  {item.summary ? (
+                    <p className="mt-1.5 text-sm leading-relaxed text-zinc-500">
+                      {item.summary}
+                    </p>
+                  ) : null}
+                </li>
+              ))
+            )}
+          </ul>
         </section>
       </main>
     </AppChrome>
