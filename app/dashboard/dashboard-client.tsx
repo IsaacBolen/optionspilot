@@ -1,8 +1,40 @@
 "use client";
 
-import { useMemo } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { AppChrome } from "../components/app-chrome";
+
+const DEFAULT_BRIEFING =
+  "Markets are digesting overnight flows. Your open AAPL call is approaching the first profit target—watch for a pullback to the 21 EMA. Consider trailing stops on NVDA if implied volatility expands. This is placeholder AI-generated commentary for your daily overview; connect your data source to personalize this briefing.";
+
+const MOCK_RESPONSES: Record<string, string> = {
+  "Today's market news":
+    "U.S. index futures are modestly green after a quiet Asia session. Yields are steady near recent highs, which continues to pressure duration-sensitive growth names. Watch the opening range in SPY for whether bulls can hold yesterday’s lows.",
+  "How are my positions?":
+    "You have three open legs: AAPL is working in your favor with IV still contained; NVDA’s put is slightly underwater but within a normal premium drift range; SPY’s call is tracking the broader tape. No single name is at max risk—consider partial trims if any position crosses 40% of your intended max loss.",
+  "What's moving today?":
+    "Semiconductors and mega-cap tech are seeing the bulk of flow again, with single-stock calls leading volume. Defensive sectors are lagging. Unusual activity is clustered in weekly expiries—worth scanning for gamma squeezes into Friday.",
+};
+
+const CUSTOM_RESPONSE_PREFIX =
+  "Here’s a quick read based on what you asked: implied volatility is still elevated versus the 30-day median, so directional trades need tighter risk. ";
+
+const INPUT_PLACEHOLDER =
+  "Ask about market news, your positions, or anything trading related...";
+
+const CHIPS = [
+  "Today's market news",
+  "How are my positions?",
+  "What's moving today?",
+] as const;
+
+const LOADING_MS = 1000;
 
 function RobotIcon({ className }: { className?: string }) {
   return (
@@ -16,7 +48,7 @@ function RobotIcon({ className }: { className?: string }) {
       strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={`block size-6 shrink-0 ${className ?? ""}`}
+      className={`block shrink-0 ${className ?? "size-6"}`}
       aria-hidden
     >
       <rect x="4" y="8" width="16" height="12" rx="2" />
@@ -60,6 +92,46 @@ const MOCK_POSITIONS = [
 ];
 
 export function DashboardClient() {
+  const [query, setQuery] = useState("");
+  const [briefingText, setBriefingText] = useState(DEFAULT_BRIEFING);
+  const [isBriefingLoading, setIsBriefingLoading] = useState(false);
+  const briefingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+
+  useEffect(() => {
+    return () => {
+      if (briefingTimeoutRef.current) {
+        clearTimeout(briefingTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const runBriefingRequest = useCallback((responseText: string) => {
+    if (briefingTimeoutRef.current) {
+      clearTimeout(briefingTimeoutRef.current);
+    }
+    setIsBriefingLoading(true);
+    briefingTimeoutRef.current = setTimeout(() => {
+      setBriefingText(responseText);
+      setIsBriefingLoading(false);
+      briefingTimeoutRef.current = null;
+    }, LOADING_MS);
+  }, []);
+
+  const handleAsk = () => {
+    const trimmed = query.trim();
+    const text = trimmed
+      ? `${CUSTOM_RESPONSE_PREFIX}${trimmed.length > 220 ? `${trimmed.slice(0, 220)}…` : trimmed}`
+      : MOCK_RESPONSES["Today's market news"];
+    runBriefingRequest(text);
+  };
+
+  const handleChip = (chip: (typeof CHIPS)[number]) => {
+    setQuery(chip);
+    runBriefingRequest(MOCK_RESPONSES[chip]);
+  };
+
   const { greeting, dateLabel } = useMemo(() => {
     const now = new Date();
     const hour = now.getHours();
@@ -88,24 +160,67 @@ export function DashboardClient() {
           <p className="mt-1 text-sm text-zinc-400">{dateLabel}</p>
         </div>
 
-        <section className="mb-8 rounded-2xl border border-zinc-800/80 bg-zinc-900/50 p-6 shadow-xl shadow-black/30 ring-1 ring-inset ring-white/5 backdrop-blur-sm sm:p-8">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-5">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-emerald-500/25 bg-emerald-500/10 text-emerald-300">
-              <RobotIcon />
-            </div>
-            <div className="min-w-0 flex-1">
-              <h2 className="text-base font-semibold text-white">
-                Today&apos;s Briefing
-              </h2>
-              <p className="mt-3 text-sm leading-relaxed text-zinc-400">
-                Markets are digesting overnight flows. Your open AAPL call is
-                approaching the first profit target—watch for a pullback to the
-                21 EMA. Consider trailing stops on NVDA if implied volatility
-                expands. This is placeholder AI-generated commentary for your
-                daily overview; connect your data source to personalize this
-                briefing.
+        <section className="mb-8 rounded-2xl border border-zinc-800/80 bg-zinc-900/50 p-4 shadow-sm shadow-black/20 ring-1 ring-inset ring-white/5 backdrop-blur-sm sm:p-5">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-emerald-500/20 bg-emerald-500/10 text-emerald-400/95">
+              <RobotIcon className="size-3.5" />
+            </span>
+            <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">
+              AI Briefing
+            </span>
+          </div>
+
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={INPUT_PLACEHOLDER}
+              disabled={isBriefingLoading}
+              className="h-9 min-w-0 flex-1 rounded-lg border border-zinc-700/80 bg-zinc-950/60 px-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-emerald-500/40 focus:outline-none focus:ring-1 focus:ring-emerald-500/30 disabled:opacity-50"
+              aria-label="Ask the briefing assistant"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleAsk();
+              }}
+            />
+            <button
+              type="button"
+              onClick={handleAsk}
+              disabled={isBriefingLoading}
+              className="shrink-0 rounded-lg border border-emerald-500/35 bg-emerald-500/15 px-3.5 text-xs font-semibold text-emerald-200 transition hover:bg-emerald-500/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 disabled:pointer-events-none disabled:opacity-50"
+            >
+              Ask
+            </button>
+          </div>
+
+          <div className="mt-3 min-h-[4.5rem] rounded-r-lg border-l-2 border-emerald-500/45 bg-zinc-950/25 py-2 pl-3.5 pr-1">
+            {isBriefingLoading ? (
+              <div className="flex items-center gap-2.5 py-1 text-sm text-zinc-500">
+                <span
+                  className="inline-block size-3.5 animate-spin rounded-full border-2 border-zinc-600 border-t-emerald-400"
+                  aria-hidden
+                />
+                <span>Thinking…</span>
+              </div>
+            ) : (
+              <p className="text-sm leading-relaxed text-zinc-400">
+                {briefingText}
               </p>
-            </div>
+            )}
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {CHIPS.map((chip) => (
+              <button
+                key={chip}
+                type="button"
+                disabled={isBriefingLoading}
+                onClick={() => handleChip(chip)}
+                className="rounded-md border border-zinc-700/70 bg-zinc-950/40 px-2.5 py-1 text-[11px] font-medium text-zinc-400 transition hover:border-emerald-500/25 hover:bg-emerald-500/[0.07] hover:text-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30 disabled:pointer-events-none disabled:opacity-50"
+              >
+                {chip}
+              </button>
+            ))}
           </div>
         </section>
 
