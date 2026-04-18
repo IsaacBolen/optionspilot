@@ -7,19 +7,26 @@ import {
   useRef,
   useState,
 } from "react";
+import Link from "next/link";
 
 import { AppChrome } from "../components/app-chrome";
 
 const DEFAULT_BRIEFING =
   "Markets are digesting overnight flows. Your open AAPL call is approaching the first profit target—watch for a pullback to the 21 EMA. Consider trailing stops on NVDA if implied volatility expands. This is placeholder AI-generated commentary for your daily overview; connect your data source to personalize this briefing.";
 
-const MOCK_RESPONSES: Record<string, string> = {
-  "Today's market news":
-    "U.S. index futures are modestly green after a quiet Asia session. Yields are steady near recent highs, which continues to pressure duration-sensitive growth names. Watch the opening range in SPY for whether bulls can hold yesterday’s lows.",
-  "How are my positions?":
-    "You have three open legs: AAPL is working in your favor with IV still contained; NVDA’s put is slightly underwater but within a normal premium drift range; SPY’s call is tracking the broader tape. No single name is at max risk—consider partial trims if any position crosses 40% of your intended max loss.",
+const CHIPS = [
+  "News on my positions",
+  "What's moving today?",
+  "How are my positions?",
+] as const;
+
+const MOCK_RESPONSES: Record<(typeof CHIPS)[number], string> = {
+  "News on my positions":
+    "Wire stories on AAPL, NVDA, and SPY are clustered around iPhone channel checks, AI datacenter spend, and index rebalancing—those three names explain most of the P&L drift in your open book today.",
   "What's moving today?":
     "Semiconductors and mega-cap tech are seeing the bulk of flow again, with single-stock calls leading volume. Defensive sectors are lagging. Unusual activity is clustered in weekly expiries—worth scanning for gamma squeezes into Friday.",
+  "How are my positions?":
+    "You have three open legs: AAPL is working in your favor with IV still contained; NVDA’s put is slightly underwater but within a normal premium drift range; SPY’s call is tracking the broader tape. No single name is at max risk—consider partial trims if any position crosses 40% of your intended max loss.",
 };
 
 const CUSTOM_RESPONSE_PREFIX =
@@ -28,13 +35,93 @@ const CUSTOM_RESPONSE_PREFIX =
 const INPUT_PLACEHOLDER =
   "Ask about market news, your positions, or anything trading related...";
 
-const CHIPS = [
-  "Today's market news",
-  "How are my positions?",
-  "What's moving today?",
-] as const;
-
 const LOADING_MS = 1000;
+
+type NewsTab = "positions" | "market";
+
+type NewsItem = {
+  source: string;
+  timeAgo: string;
+  title: string;
+  summary: string;
+};
+
+const MY_POSITIONS_NEWS: NewsItem[] = [
+  {
+    source: "Bloomberg",
+    timeAgo: "45m ago",
+    title:
+      "Apple suppliers signal steady iPhone build rates into spring quarter",
+    summary:
+      "AAPL shares drifted higher as analysts said component orders imply demand holding near plan, which matters for your May call exposure.",
+  },
+  {
+    source: "CNBC",
+    timeAgo: "1h ago",
+    title: "Nvidia supplier checks point to sustained AI accelerator demand",
+    summary:
+      "NVDA moved on chatter that cloud capex timelines remain intact, a key read-through for the short-dated put you are carrying.",
+  },
+  {
+    source: "Reuters",
+    timeAgo: "2h ago",
+    title: "S&P 500 holds range as traders await next inflation datapoint",
+    summary:
+      "SPY hugged the prior session’s value area; index-level liquidity is still the backdrop for your June call leg.",
+  },
+  {
+    source: "Bloomberg",
+    timeAgo: "3h ago",
+    title: "Apple services growth narrative back in focus ahead of conference circuit",
+    summary:
+      "AAPL option skew firmed slightly after a note highlighted recurring revenue resilience, relevant for how your call premium behaves into May.",
+  },
+  {
+    source: "CNBC",
+    timeAgo: "5h ago",
+    title: "Semiconductor index volatility dips as NVDA consolidates recent gains",
+    summary:
+      "NVDA’s implied move cooled, which can compress premium on your put if realized range stays tight.",
+  },
+];
+
+const GENERAL_MARKET_NEWS: NewsItem[] = [
+  {
+    source: "Reuters",
+    timeAgo: "20m ago",
+    title: "Global yields steady after central bankers push back on early cuts",
+    summary:
+      "Traders repriced rate-cut odds for late 2025 as officials emphasized data dependence, keeping pressure on long-duration equities.",
+  },
+  {
+    source: "Bloomberg",
+    timeAgo: "1h ago",
+    title: "Oil slips as inventory build tempers summer demand optimism",
+    summary:
+      "Energy complex softness fed into cyclical sentiment while defensives caught a modest bid in afternoon trading.",
+  },
+  {
+    source: "CNBC",
+    timeAgo: "2h ago",
+    title: "Dollar index firms on relative growth outlook versus major peers",
+    summary:
+      "FX flows favored the greenback after stronger-than-expected PMIs, weighing on overseas earnings translations for multinationals.",
+  },
+  {
+    source: "Reuters",
+    timeAgo: "4h ago",
+    title: "Credit spreads tighten as investment-grade issuance sees solid demand",
+    summary:
+      "Corporate bond buyers absorbed a busy new-issue calendar, a constructive sign for risk appetite despite equity chop.",
+  },
+  {
+    source: "Bloomberg",
+    timeAgo: "6h ago",
+    title: "Fed watchers debate whether sticky services inflation delays easing path",
+    summary:
+      "Macro desks highlighted shelter and healthcare prints as sticking points that could keep policy restrictive longer than futures imply.",
+  },
+];
 
 function RobotIcon({ className }: { className?: string }) {
   return (
@@ -92,6 +179,7 @@ const MOCK_POSITIONS = [
 ];
 
 export function DashboardClient() {
+  const [newsTab, setNewsTab] = useState<NewsTab>("positions");
   const [query, setQuery] = useState("");
   const [briefingText, setBriefingText] = useState(DEFAULT_BRIEFING);
   const [isBriefingLoading, setIsBriefingLoading] = useState(false);
@@ -123,7 +211,7 @@ export function DashboardClient() {
     const trimmed = query.trim();
     const text = trimmed
       ? `${CUSTOM_RESPONSE_PREFIX}${trimmed.length > 220 ? `${trimmed.slice(0, 220)}…` : trimmed}`
-      : MOCK_RESPONSES["Today's market news"];
+      : MOCK_RESPONSES["What's moving today?"];
     runBriefingRequest(text);
   };
 
@@ -149,6 +237,9 @@ export function DashboardClient() {
     });
     return { greeting, dateLabel };
   }, []);
+
+  const newsItems =
+    newsTab === "positions" ? MY_POSITIONS_NEWS : GENERAL_MARKET_NEWS;
 
   return (
     <AppChrome>
@@ -262,6 +353,70 @@ export function DashboardClient() {
               <p className="mt-1 text-xs text-zinc-500">{card.hint}</p>
             </div>
           ))}
+        </section>
+
+        <section className="mb-8 overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm shadow-black/20 ring-1 ring-inset ring-white/5 backdrop-blur-sm">
+          <div className="border-b border-zinc-800/80 px-5 py-4">
+            <h2 className="text-sm font-semibold text-white">News</h2>
+            <p className="mt-0.5 text-xs text-zinc-500">
+              Mock headlines for layout preview
+            </p>
+            <div
+              className="mt-4 flex gap-1 rounded-lg border border-zinc-800/80 bg-zinc-950/50 p-1"
+              role="tablist"
+              aria-label="News feed category"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={newsTab === "positions"}
+                className={`min-h-9 flex-1 rounded-md px-3 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 ${
+                  newsTab === "positions"
+                    ? "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-500/25"
+                    : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
+                }`}
+                onClick={() => setNewsTab("positions")}
+              >
+                My Positions
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={newsTab === "market"}
+                className={`min-h-9 flex-1 rounded-md px-3 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 ${
+                  newsTab === "market"
+                    ? "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-500/25"
+                    : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
+                }`}
+                onClick={() => setNewsTab("market")}
+              >
+                General Market
+              </button>
+            </div>
+          </div>
+          <ul className="divide-y divide-white/5">
+            {newsItems.map((item, i) => (
+              <li key={`${newsTab}-${i}-${item.title}`} className="px-5 py-4">
+                <div className="flex flex-wrap items-center gap-2 gap-y-1">
+                  <span className="rounded-md bg-zinc-800/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
+                    {item.source}
+                  </span>
+                  <span className="text-[11px] tabular-nums text-zinc-600">
+                    {item.timeAgo}
+                  </span>
+                </div>
+                <Link
+                  href="#"
+                  className="mt-2 block text-sm font-medium text-white transition hover:text-emerald-200/95"
+                >
+                  {item.title}
+                </Link>
+                <p className="mt-1.5 text-sm leading-relaxed text-zinc-500">
+                  {item.summary}
+                </p>
+              </li>
+            ))}
+          </ul>
         </section>
 
         <section className="overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm shadow-black/20 ring-1 ring-inset ring-white/5 backdrop-blur-sm">
