@@ -25,6 +25,8 @@ const DASHBOARD_DEFAULT_MESSAGE =
 
 const DEFAULT_NEWS_TICKERS = "AAPL,NVDA,SPY";
 
+const DEFAULT_MARKET_TICKERS = "SPY,QQQ,DIA,IWM";
+
 /** Skip false-positive “tickers” from prose */
 const TICKER_BLOCKLIST = new Set([
   "THE",
@@ -81,6 +83,13 @@ type SentimentState = {
   sentimentScore: number;
   sentimentLabel: SentimentLabel;
   summary: string;
+};
+
+type MarketQuote = {
+  ticker: string;
+  price: number | null;
+  changePercent: number | null;
+  error?: string;
 };
 
 function formatScopeLabel(tickersCsv: string): string {
@@ -154,6 +163,66 @@ function formatTimeAgo(iso: string): string {
   });
 }
 
+function formatUsdPrice(n: number): string {
+  return n.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatChangePct(p: number | null): string {
+  if (p === null || Number.isNaN(p)) return "—";
+  const sign = p > 0 ? "+" : "";
+  return `${sign}${p.toFixed(2)}%`;
+}
+
+function changeColorClass(p: number | null): string {
+  if (p === null || Number.isNaN(p) || p === 0) return "text-zinc-400";
+  return p > 0 ? "text-emerald-400" : "text-red-400";
+}
+
+function MiniLineChart({ closes }: { closes: number[] }) {
+  const values = closes.filter((x) => Number.isFinite(x));
+  if (values.length < 2) {
+    return (
+      <p className="text-xs text-zinc-600">Not enough data for a chart.</p>
+    );
+  }
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const w = 200;
+  const h = 64;
+  const pad = 4;
+  const spanX = w - pad * 2;
+  const spanY = h - pad * 2;
+  const denom = max - min || 1;
+  const points = values
+    .map((c, i) => {
+      const x = pad + (i / (values.length - 1)) * spanX;
+      const y = pad + (1 - (c - min) / denom) * spanY;
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    })
+    .join(" ");
+  const up = values[values.length - 1] >= values[0];
+  return (
+    <svg
+      viewBox={`0 0 ${w} ${h}`}
+      className={`h-20 w-full max-w-[280px] shrink-0 sm:h-24 ${up ? "text-emerald-400/90" : "text-red-400/90"}`}
+      preserveAspectRatio="none"
+      aria-hidden
+    >
+      <polyline
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        points={points}
+      />
+    </svg>
+  );
+}
+
 function RobotIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -179,36 +248,6 @@ function RobotIcon({ className }: { className?: string }) {
   );
 }
 
-const MOCK_POSITIONS = [
-  {
-    ticker: "AAPL",
-    type: "Call" as const,
-    strike: 185,
-    expiration: "May 16, 2025",
-    entryPremium: "$2.40",
-    currentPremium: "$3.15",
-    pnlPct: "+31.3%",
-  },
-  {
-    ticker: "NVDA",
-    type: "Put" as const,
-    strike: 118,
-    expiration: "Apr 25, 2025",
-    entryPremium: "$4.10",
-    currentPremium: "$3.55",
-    pnlPct: "-13.4%",
-  },
-  {
-    ticker: "SPY",
-    type: "Call" as const,
-    strike: 520,
-    expiration: "Jun 20, 2025",
-    entryPremium: "$6.80",
-    currentPremium: "$7.95",
-    pnlPct: "+16.9%",
-  },
-];
-
 export function DashboardClient() {
   const [newsArticles, setNewsArticles] = useState<NewsArticle[]>([]);
   const [feedTickersCsv, setFeedTickersCsv] =
@@ -224,6 +263,88 @@ export function DashboardClient() {
   const [briefingText, setBriefingText] = useState(DEFAULT_BRIEFING);
   const [isBriefingLoading, setIsBriefingLoading] = useState(false);
   const [briefingError, setBriefingError] = useState<string | null>(null);
+
+  const [marketQuotes, setMarketQuotes] = useState<MarketQuote[]>([]);
+  const [marketLoading, setMarketLoading] = useState(true);
+  const [marketError, setMarketError] = useState<string | null>(null);
+  const [marketFocusTicker, setMarketFocusTicker] = useState<string | null>(
+    null,
+  );
+  const [chartBars, setChartBars] = useState<{ t: number; c: number }[]>([]);
+  const [chartLoading, setChartLoading] = useState(false);
+  const [chartError, setChartError] = useState<string | null>(null);
+
+  const loadDefaultMarket = useCallback(async () => {
+    setMarketFocusTicker(null);
+    setChartBars([]);
+    setChartError(null);
+    setChartLoading(false);
+    setMarketLoading(true);
+    setMarketError(null);
+    try {
+      const res = await fetch(
+        `/api/market?tickers=${encodeURIComponent(DEFAULT_MARKET_TICKERS)}`,
+      );
+      const data = (await res.json()) as {
+        quotes?: MarketQuote[];
+        error?: string;
+      };
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to load market");
+      }
+      setMarketQuotes(Array.isArray(data.quotes) ? data.quotes : []);
+    } catch (e) {
+      setMarketQuotes([]);
+      setMarketError(
+        e instanceof Error ? e.message : "Could not load market data.",
+      );
+    } finally {
+      setMarketLoading(false);
+    }
+  }, []);
+
+  const loadFocusedMarket = useCallback(async (ticker: string) => {
+    const sym = ticker.trim().toUpperCase();
+    setMarketFocusTicker(sym);
+    setMarketLoading(true);
+    setChartLoading(true);
+    setMarketError(null);
+    setChartError(null);
+    try {
+      const [mRes, cRes] = await Promise.all([
+        fetch(`/api/market?tickers=${encodeURIComponent(sym)}`),
+        fetch(`/api/chart?ticker=${encodeURIComponent(sym)}`),
+      ]);
+      const mData = (await mRes.json()) as {
+        quotes?: MarketQuote[];
+        error?: string;
+      };
+      const cData = (await cRes.json()) as {
+        bars?: { t: number; c: number }[];
+        error?: string;
+      };
+      if (!mRes.ok) {
+        throw new Error(mData.error ?? "Failed to load price");
+      }
+      setMarketQuotes(Array.isArray(mData.quotes) ? mData.quotes : []);
+      if (!cRes.ok) {
+        setChartBars([]);
+        setChartError(cData.error ?? "Could not load chart");
+      } else {
+        setChartBars(Array.isArray(cData.bars) ? cData.bars : []);
+        setChartError(null);
+      }
+    } catch (e) {
+      setMarketQuotes([]);
+      setChartBars([]);
+      setMarketError(
+        e instanceof Error ? e.message : "Could not load market data.",
+      );
+    } finally {
+      setMarketLoading(false);
+      setChartLoading(false);
+    }
+  }, []);
 
   const loadNewsFeed = useCallback(async (tickersCsv: string) => {
     setNewsLoading(true);
@@ -314,6 +435,10 @@ export function DashboardClient() {
     void loadNewsFeed(DEFAULT_NEWS_TICKERS);
   }, [loadNewsFeed]);
 
+  useEffect(() => {
+    void loadDefaultMarket();
+  }, [loadDefaultMarket]);
+
   const fetchBriefing = useCallback(async (userMessage: string) => {
     setIsBriefingLoading(true);
     setBriefingError(null);
@@ -350,17 +475,20 @@ export function DashboardClient() {
     if (resolvedTicker) {
       void loadNewsFeed(resolvedTicker);
       void fetchBriefing(trimmed);
+      void loadFocusedMarket(resolvedTicker);
       return;
     }
 
     void loadNewsFeed(DEFAULT_NEWS_TICKERS);
     void fetchBriefing(trimmed || DASHBOARD_DEFAULT_MESSAGE);
+    void loadDefaultMarket();
   };
 
   const handleChip = (chip: (typeof CHIPS)[number]) => {
     setQuery(chip);
     if (chip === "News on my positions") {
       void loadNewsFeed(DEFAULT_NEWS_TICKERS);
+      void loadDefaultMarket();
     }
     void fetchBriefing(chip);
   };
@@ -391,6 +519,9 @@ export function DashboardClient() {
   const sentimentUi = sentiment
     ? sentimentStyles(sentiment.sentimentLabel)
     : null;
+
+  const focusedQuote =
+    marketFocusTicker != null ? marketQuotes[0] : undefined;
 
   return (
     <AppChrome>
@@ -592,69 +723,90 @@ export function DashboardClient() {
 
         <section className="overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm shadow-black/20 ring-1 ring-inset ring-white/5 backdrop-blur-sm">
           <div className="border-b border-zinc-800/80 px-5 py-4">
-            <h2 className="text-sm font-semibold text-white">Positions</h2>
+            <h2 className="text-sm font-semibold text-white">Market overview</h2>
             <p className="mt-0.5 text-xs text-zinc-500">
-              Mock data for layout preview
+              {marketFocusTicker
+                ? `${marketFocusTicker} · Polygon prev session & hourly chart`
+                : `${DEFAULT_MARKET_TICKERS.replace(/,/g, " · ")} · Polygon prev session`}
             </p>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-left text-sm">
-              <thead>
-                <tr className="border-b border-zinc-800/80 bg-zinc-950/40 text-xs font-medium uppercase tracking-wider text-zinc-500">
-                  <th className="px-5 py-3.5">Ticker</th>
-                  <th className="px-5 py-3.5">Type</th>
-                  <th className="px-5 py-3.5 text-right">Strike</th>
-                  <th className="px-5 py-3.5">Expiration</th>
-                  <th className="px-5 py-3.5 text-right">Entry Premium</th>
-                  <th className="px-5 py-3.5 text-right">Current Premium</th>
-                  <th className="px-5 py-3.5 text-right">P&amp;L %</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {MOCK_POSITIONS.map((row) => (
-                  <tr
-                    key={`${row.ticker}-${row.strike}-${row.type}`}
-                    className="text-zinc-300 transition hover:bg-white/[0.02]"
+          <div className="px-5 py-5">
+            {marketLoading ? (
+              <p className="text-center text-sm text-zinc-500">
+                Loading prices…
+              </p>
+            ) : marketError ? (
+              <p className="text-center text-sm text-red-400/90">{marketError}</p>
+            ) : marketFocusTicker ? (
+              <div className="flex flex-col gap-5 sm:flex-row sm:items-stretch sm:justify-between">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+                    {focusedQuote?.ticker ?? marketFocusTicker}
+                  </p>
+                  {focusedQuote?.price != null ? (
+                    <p className="mt-1 text-3xl font-semibold tabular-nums tracking-tight text-white">
+                      ${formatUsdPrice(focusedQuote.price)}
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-sm text-zinc-500">
+                      {focusedQuote?.error ?? "No price data"}
+                    </p>
+                  )}
+                  <p
+                    className={`mt-2 text-sm font-medium tabular-nums ${changeColorClass(focusedQuote?.changePercent ?? null)}`}
                   >
-                    <td className="px-5 py-4 font-medium text-white">
-                      {row.ticker}
-                    </td>
-                    <td className="px-5 py-4">
-                      <span
-                        className={
-                          row.type === "Call"
-                            ? "rounded-md bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-300"
-                            : "rounded-md bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-300"
-                        }
-                      >
-                        {row.type}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4 text-right tabular-nums text-zinc-200">
-                      ${row.strike}
-                    </td>
-                    <td className="px-5 py-4 tabular-nums text-zinc-400">
-                      {row.expiration}
-                    </td>
-                    <td className="px-5 py-4 text-right tabular-nums">
-                      {row.entryPremium}
-                    </td>
-                    <td className="px-5 py-4 text-right tabular-nums">
-                      {row.currentPremium}
-                    </td>
-                    <td
-                      className={`px-5 py-4 text-right tabular-nums font-medium ${
-                        row.pnlPct.startsWith("-")
-                          ? "text-red-400"
-                          : "text-emerald-400"
-                      }`}
+                    {formatChangePct(focusedQuote?.changePercent ?? null)}
+                  </p>
+                  <p className="mt-3 text-xs text-zinc-600">
+                    Daily % from prior session open → close (Polygon{" "}
+                    <code className="text-zinc-500">/prev</code>).
+                  </p>
+                </div>
+                <div className="flex min-h-[5rem] flex-1 flex-col justify-center border-t border-zinc-800/80 pt-5 sm:border-l sm:border-t-0 sm:pl-6 sm:pt-0">
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+                    Hourly closes (UTC yesterday → today)
+                  </p>
+                  {chartLoading ? (
+                    <p className="text-xs text-zinc-500">Loading chart…</p>
+                  ) : chartError ? (
+                    <p className="text-xs text-amber-400/90">{chartError}</p>
+                  ) : (
+                    <MiniLineChart closes={chartBars.map((b) => b.c)} />
+                  )}
+                </div>
+              </div>
+            ) : marketQuotes.length === 0 ? (
+              <p className="text-center text-sm text-zinc-500">
+                No quotes returned.
+              </p>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {marketQuotes.map((q) => (
+                  <div
+                    key={q.ticker}
+                    className="rounded-xl border border-zinc-800/80 bg-zinc-950/40 p-4 ring-1 ring-inset ring-white/[0.04]"
+                  >
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+                      {q.ticker}
+                    </p>
+                    {q.price != null ? (
+                      <p className="mt-2 text-lg font-semibold tabular-nums text-white sm:text-xl">
+                        ${formatUsdPrice(q.price)}
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-xs text-zinc-500">
+                        {q.error ?? "—"}
+                      </p>
+                    )}
+                    <p
+                      className={`mt-1.5 text-sm font-medium tabular-nums ${changeColorClass(q.changePercent)}`}
                     >
-                      {row.pnlPct}
-                    </td>
-                  </tr>
+                      {formatChangePct(q.changePercent)}
+                    </p>
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+            )}
           </div>
         </section>
       </main>
