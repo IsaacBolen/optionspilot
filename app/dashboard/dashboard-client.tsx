@@ -7,8 +7,6 @@ import {
   useRef,
   useState,
 } from "react";
-import Link from "next/link";
-
 import { AppChrome } from "../components/app-chrome";
 
 const DEFAULT_BRIEFING =
@@ -39,89 +37,34 @@ const LOADING_MS = 1000;
 
 type NewsTab = "positions" | "market";
 
-type NewsItem = {
-  source: string;
-  timeAgo: string;
-  title: string;
+type NewsArticle = {
+  headline: string;
   summary: string;
+  source: string;
+  url: string;
+  datetime: string;
 };
 
-const MY_POSITIONS_NEWS: NewsItem[] = [
-  {
-    source: "Bloomberg",
-    timeAgo: "45m ago",
-    title:
-      "Apple suppliers signal steady iPhone build rates into spring quarter",
-    summary:
-      "AAPL shares drifted higher as analysts said component orders imply demand holding near plan, which matters for your May call exposure.",
-  },
-  {
-    source: "CNBC",
-    timeAgo: "1h ago",
-    title: "Nvidia supplier checks point to sustained AI accelerator demand",
-    summary:
-      "NVDA moved on chatter that cloud capex timelines remain intact, a key read-through for the short-dated put you are carrying.",
-  },
-  {
-    source: "Reuters",
-    timeAgo: "2h ago",
-    title: "S&P 500 holds range as traders await next inflation datapoint",
-    summary:
-      "SPY hugged the prior session’s value area; index-level liquidity is still the backdrop for your June call leg.",
-  },
-  {
-    source: "Bloomberg",
-    timeAgo: "3h ago",
-    title: "Apple services growth narrative back in focus ahead of conference circuit",
-    summary:
-      "AAPL option skew firmed slightly after a note highlighted recurring revenue resilience, relevant for how your call premium behaves into May.",
-  },
-  {
-    source: "CNBC",
-    timeAgo: "5h ago",
-    title: "Semiconductor index volatility dips as NVDA consolidates recent gains",
-    summary:
-      "NVDA’s implied move cooled, which can compress premium on your put if realized range stays tight.",
-  },
-];
+const NEWS_TICKERS_POSITIONS = "AAPL,NVDA,SPY";
+const NEWS_TICKERS_MARKET = "SPY,QQQ,IWM,DIA";
 
-const GENERAL_MARKET_NEWS: NewsItem[] = [
-  {
-    source: "Reuters",
-    timeAgo: "20m ago",
-    title: "Global yields steady after central bankers push back on early cuts",
-    summary:
-      "Traders repriced rate-cut odds for late 2025 as officials emphasized data dependence, keeping pressure on long-duration equities.",
-  },
-  {
-    source: "Bloomberg",
-    timeAgo: "1h ago",
-    title: "Oil slips as inventory build tempers summer demand optimism",
-    summary:
-      "Energy complex softness fed into cyclical sentiment while defensives caught a modest bid in afternoon trading.",
-  },
-  {
-    source: "CNBC",
-    timeAgo: "2h ago",
-    title: "Dollar index firms on relative growth outlook versus major peers",
-    summary:
-      "FX flows favored the greenback after stronger-than-expected PMIs, weighing on overseas earnings translations for multinationals.",
-  },
-  {
-    source: "Reuters",
-    timeAgo: "4h ago",
-    title: "Credit spreads tighten as investment-grade issuance sees solid demand",
-    summary:
-      "Corporate bond buyers absorbed a busy new-issue calendar, a constructive sign for risk appetite despite equity chop.",
-  },
-  {
-    source: "Bloomberg",
-    timeAgo: "6h ago",
-    title: "Fed watchers debate whether sticky services inflation delays easing path",
-    summary:
-      "Macro desks highlighted shelter and healthcare prints as sticking points that could keep policy restrictive longer than futures imply.",
-  },
-];
+function formatTimeAgo(iso: string): string {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "";
+  const diffMs = Date.now() - t;
+  const sec = Math.floor(diffMs / 1000);
+  if (sec < 45) return "just now";
+  const mins = Math.floor(sec / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 48) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 14) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
 
 function RobotIcon({ className }: { className?: string }) {
   return (
@@ -180,6 +123,9 @@ const MOCK_POSITIONS = [
 
 export function DashboardClient() {
   const [newsTab, setNewsTab] = useState<NewsTab>("positions");
+  const [newsArticles, setNewsArticles] = useState<NewsArticle[]>([]);
+  const [newsLoading, setNewsLoading] = useState(true);
+  const [newsError, setNewsError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [briefingText, setBriefingText] = useState(DEFAULT_BRIEFING);
   const [isBriefingLoading, setIsBriefingLoading] = useState(false);
@@ -194,6 +140,41 @@ export function DashboardClient() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    const tickers =
+      newsTab === "positions"
+        ? NEWS_TICKERS_POSITIONS
+        : NEWS_TICKERS_MARKET;
+    const ac = new AbortController();
+    setNewsLoading(true);
+    setNewsError(null);
+
+    fetch(`/api/news?tickers=${encodeURIComponent(tickers)}`, {
+      signal: ac.signal,
+    })
+      .then(async (res) => {
+        const data = (await res.json()) as {
+          articles?: NewsArticle[];
+          error?: string;
+        };
+        if (!res.ok) {
+          throw new Error(data.error ?? "Failed to load news");
+        }
+        setNewsArticles(Array.isArray(data.articles) ? data.articles : []);
+        setNewsLoading(false);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof Error && err.name === "AbortError") return;
+        setNewsArticles([]);
+        setNewsError(
+          err instanceof Error ? err.message : "Could not load news.",
+        );
+        setNewsLoading(false);
+      });
+
+    return () => ac.abort();
+  }, [newsTab]);
 
   const runBriefingRequest = useCallback((responseText: string) => {
     if (briefingTimeoutRef.current) {
@@ -237,9 +218,6 @@ export function DashboardClient() {
     });
     return { greeting, dateLabel };
   }, []);
-
-  const newsItems =
-    newsTab === "positions" ? MY_POSITIONS_NEWS : GENERAL_MARKET_NEWS;
 
   return (
     <AppChrome>
@@ -359,7 +337,7 @@ export function DashboardClient() {
           <div className="border-b border-zinc-800/80 px-5 py-4">
             <h2 className="text-sm font-semibold text-white">News</h2>
             <p className="mt-0.5 text-xs text-zinc-500">
-              Mock headlines for layout preview
+              Company headlines via Finnhub (last 30 days)
             </p>
             <div
               className="mt-4 flex gap-1 rounded-lg border border-zinc-800/80 bg-zinc-950/50 p-1"
@@ -395,27 +373,48 @@ export function DashboardClient() {
             </div>
           </div>
           <ul className="divide-y divide-white/5">
-            {newsItems.map((item, i) => (
-              <li key={`${newsTab}-${i}-${item.title}`} className="px-5 py-4">
-                <div className="flex flex-wrap items-center gap-2 gap-y-1">
-                  <span className="rounded-md bg-zinc-800/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
-                    {item.source}
-                  </span>
-                  <span className="text-[11px] tabular-nums text-zinc-600">
-                    {item.timeAgo}
-                  </span>
-                </div>
-                <Link
-                  href="#"
-                  className="mt-2 block text-sm font-medium text-white transition hover:text-emerald-200/95"
-                >
-                  {item.title}
-                </Link>
-                <p className="mt-1.5 text-sm leading-relaxed text-zinc-500">
-                  {item.summary}
-                </p>
+            {newsLoading ? (
+              <li className="px-5 py-10 text-center text-sm text-zinc-500">
+                Loading headlines…
               </li>
-            ))}
+            ) : newsError ? (
+              <li className="px-5 py-8 text-center text-sm text-red-400/90">
+                {newsError}
+              </li>
+            ) : newsArticles.length === 0 ? (
+              <li className="px-5 py-8 text-center text-sm text-zinc-500">
+                No articles in this window. Try again later.
+              </li>
+            ) : (
+              newsArticles.map((item, i) => (
+                <li
+                  key={`${item.datetime}-${item.url}-${i}`}
+                  className="px-5 py-4"
+                >
+                  <div className="flex flex-wrap items-center gap-2 gap-y-1">
+                    <span className="rounded-md bg-zinc-800/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
+                      {item.source}
+                    </span>
+                    <span className="text-[11px] tabular-nums text-zinc-600">
+                      {formatTimeAgo(item.datetime)}
+                    </span>
+                  </div>
+                  <a
+                    href={item.url || "#"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-2 block text-sm font-medium text-white transition hover:text-emerald-200/95"
+                  >
+                    {item.headline || "Untitled"}
+                  </a>
+                  {item.summary ? (
+                    <p className="mt-1.5 text-sm leading-relaxed text-zinc-500">
+                      {item.summary}
+                    </p>
+                  ) : null}
+                </li>
+              ))
+            )}
           </ul>
         </section>
 
