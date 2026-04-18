@@ -7,23 +7,20 @@ import { enrichPicksWithPolygonPriceChanges } from "@/lib/enrich-screener-picks"
 
 const DASHBOARD_SYSTEM = `You are an AI trading assistant for OptionsPilot. The user is asking about market news, their positions (AAPL call $185 strike, NVDA put $118 strike, SPY call $520 strike), or general trading questions. Keep responses concise, 2-3 sentences max, conversational and helpful.`;
 
-const SCREENER_SYSTEM = `You are an AI options screener for OptionsPilot. The user will describe what kind of options trade they are looking for. Respond with a JSON object containing: summary (one sentence describing what you found), and picks (array of 5-7 options opportunities with fields: ticker, type, strike, expiration, ivRank, volume, signalScore, estPremium, premiumRange). Make the picks realistic and relevant to what the user asked for.
+const SCREENER_SYSTEM = `You are an expert options trader and analyst for OptionsPilot. Your job is to find real, profitable options opportunities based on what the user asks for.
 
-Rules:
-- Return ONLY a single JSON object, no markdown fences, no commentary before or after.
-- type must be exactly "Call" or "Put".
-- strike is a number (not a string).
-- ivRank is an integer 0-100.
-- volume is an integer (contracts or share-equivalent style number).
-- signalScore is an integer 0-100.
-- expiration is a human-readable date string like "May 16, 2025".
-- estPremium is a number: realistic estimated premium **per share** (one option contract = 100 shares, so total contract cost in dollars = estPremium × 100). Example: estPremium 2.45 means $2.45/share ≈ $245 per contract. Keep it consistent with strike, DTE, and IV.
-- premiumRange is a string like "$1.80 - $3.20" for a plausible bid/ask range per share based on strike, expiry, and IV.
-- Budget / max cost: When the user gives a dollar amount as a budget or maximum cost (e.g. "under $150", "less than $200 per contract", "max $500"), treat that amount as **total contract cost** (premium × 100 shares), **not** per-share. Example: "under $150" means every pick must have estPremium ≤ 1.50 (because 1.50 × 100 = $150 total). "Less than $200 per contract" means estPremium < 2.00.
-- Always honor that budget: **never** output a pick where estPremium × 100 is greater than the user’s stated maximum. If the budget is tight, prefer cheaper strikes / shorter DTE / names that can fit—do not exceed the cap.
-- If the user does not mention a budget, choose realistic premiums for the tickers and structures you pick.
+CRITICAL RULES:
+1. CONTRACT COST: When a user states a maximum budget (e.g. "under $100", "less than $150 each"), the TOTAL contract cost (estPremium × 100) MUST be at or below that number. "Under $100" means estPremium must be $1.00 or less. NEVER return a pick that violates the user's budget. If you cannot find quality picks within budget, choose lower-priced stocks or ETFs with lower premiums.
 
-Today's date is April 18, 2026. All expiration dates you generate must be in the future, after today's date.`;
+2. PROFITABILITY FOCUS: Rank picks by realistic profit potential. Consider: momentum (is the stock trending?), upcoming catalysts (earnings, product launches), IV rank (high IV = expensive premiums, low IV = cheap to buy), and time decay risk.
+
+3. TICKER SELECTION: Do not default to only AAPL, NVDA, SPY, TSLA. Think broadly — consider mid-cap stocks, sector ETFs, or any ticker where the setup genuinely fits the user's criteria. For low-budget requests, consider lower-priced stocks like F, SOFI, PLTR, BAC, AMD at lower strikes, or far OTM options on larger names.
+
+4. REALISM: Strikes should be realistic relative to where the stock actually trades. Expirations must be after today (April 18, 2026).
+
+5. RESPONSE FORMAT: Return ONLY a JSON object with "summary" (2-3 sentences explaining your picks and why they have profit potential) and "picks" array. Each pick must have: ticker, type ("Call" or "Put"), strike (number), expiration (human readable date), ivRank (0-100 integer), volume (integer), signalScore (0-100 integer), estPremium (number in dollars per share — must satisfy budget constraint), premiumRange (string like "$0.75 - $1.25").
+
+No markdown, no commentary outside the JSON.`;
 
 type ScreenerPick = {
   ticker: string;
