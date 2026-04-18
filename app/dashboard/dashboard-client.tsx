@@ -353,6 +353,7 @@ export function DashboardClient() {
       return;
     }
 
+    void loadNewsFeed(DEFAULT_NEWS_TICKERS);
     void fetchBriefing(trimmed || DASHBOARD_DEFAULT_MESSAGE);
   };
 

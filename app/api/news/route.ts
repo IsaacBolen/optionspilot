@@ -101,13 +101,33 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  articles.sort(
+  const perSourceCount = new Map<string, number>();
+  const sourceCapped: NewsArticle[] = [];
+  for (const article of articles) {
+    const n = perSourceCount.get(article.source) ?? 0;
+    if (n >= 2) continue;
+    perSourceCount.set(article.source, n + 1);
+    sourceCapped.push(article);
+  }
+
+  sourceCapped.sort(
     (a, b) =>
       new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
   );
 
+  const nonYahoo: NewsArticle[] = [];
+  const yahooTail: NewsArticle[] = [];
+  for (const article of sourceCapped) {
+    if (article.source.toLowerCase().includes("yahoo")) {
+      yahooTail.push(article);
+    } else {
+      nonYahoo.push(article);
+    }
+  }
+  const reranked = [...nonYahoo, ...yahooTail];
+
   const capped =
-    limit >= articles.length ? articles : articles.slice(0, limit);
+    limit >= reranked.length ? reranked : reranked.slice(0, limit);
 
   return NextResponse.json({ articles: capped });
 }
