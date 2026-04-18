@@ -153,11 +153,6 @@ const DEFAULT_ROWS: ScreenerRow[] = [
 const SCREENER_DEFAULT_MESSAGE =
   "Suggest a handful of liquid US equity options that could fit a balanced bullish-bias book over the next few weeks.";
 
-function formatEstPremium(est: number | null | undefined): string {
-  if (est == null || !Number.isFinite(est)) return "—";
-  return `$${est.toFixed(2)}`;
-}
-
 function change1wClass(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n) || n === 0) return "text-zinc-400";
   return n > 0 ? "text-emerald-400" : "text-red-400";
@@ -500,8 +495,29 @@ export function ScreenerClient() {
                       <td className="px-5 py-4 text-right tabular-nums">
                         {row.volume.toLocaleString("en-US")}
                       </td>
-                      <td className="px-5 py-4 text-right tabular-nums text-zinc-200">
-                        {formatEstPremium(row.estPremium)}
+                      <td className="px-5 py-4 text-right align-top tabular-nums">
+                        {row.estPremium != null &&
+                        Number.isFinite(row.estPremium) ? (
+                          <div className="flex flex-col items-end gap-0.5">
+                            <span className="text-sm text-zinc-200">
+                              ${row.estPremium.toFixed(2)}/share
+                            </span>
+                            <span className="text-[11px] leading-tight text-zinc-400">
+                              ~
+                              {Math.round(row.estPremium * 100).toLocaleString(
+                                "en-US",
+                                {
+                                  style: "currency",
+                                  currency: "USD",
+                                  maximumFractionDigits: 0,
+                                },
+                              )}{" "}
+                              per contract
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-zinc-500">—</span>
+                        )}
                       </td>
                       <td
                         className={`px-5 py-4 text-right tabular-nums font-medium ${change1wClass(row.change1w)}`}
