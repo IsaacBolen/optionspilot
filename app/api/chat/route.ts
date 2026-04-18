@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 
+/** Dashboard news headline sentiment is handled separately by `app/api/sentiment/route.ts`. */
+
 const DASHBOARD_SYSTEM = `You are an AI trading assistant for OptionsPilot. The user is asking about market news, their positions (AAPL call $185 strike, NVDA put $118 strike, SPY call $520 strike), or general trading questions. Keep responses concise, 2-3 sentences max, conversational and helpful.`;
 
 const SCREENER_SYSTEM = `You are an AI options screener for OptionsPilot. The user will describe what kind of options trade they are looking for. Respond with a JSON object containing: summary (one sentence describing what you found), and picks (array of 5-7 options opportunities with fields: ticker, type, strike, expiration, ivRank, volume, signalScore). Make the picks realistic and relevant to what the user asked for.

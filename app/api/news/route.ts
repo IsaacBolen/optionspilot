@@ -44,6 +44,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ articles: [] as NewsArticle[] });
   }
 
+  const limitParam = request.nextUrl.searchParams.get("limit");
+  let limit = Number.parseInt(limitParam ?? "10", 10);
+  if (!Number.isFinite(limit) || limit < 1) limit = 10;
+  limit = Math.min(Math.max(limit, 1), 10);
+
   const to = new Date();
   const from = new Date(to);
   from.setDate(from.getDate() - 30);
@@ -101,5 +106,8 @@ export async function GET(request: NextRequest) {
       new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
   );
 
-  return NextResponse.json({ articles });
+  const capped =
+    limit >= articles.length ? articles : articles.slice(0, limit);
+
+  return NextResponse.json({ articles: capped });
 }

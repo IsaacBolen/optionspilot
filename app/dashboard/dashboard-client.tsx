@@ -18,12 +18,54 @@ const CHIPS = [
 ] as const;
 
 const INPUT_PLACEHOLDER =
-  "Ask about market news, your positions, or anything trading related...";
+  'Try: "show me news on PLTR" or ask about markets and your book…';
 
 const DASHBOARD_DEFAULT_MESSAGE =
   "Give a very brief morning-style read on markets and how it might relate to my AAPL, NVDA, and SPY options.";
 
-type NewsTab = "positions" | "market";
+const DEFAULT_NEWS_TICKERS = "AAPL,NVDA,SPY";
+
+/** Skip false-positive “tickers” from prose */
+const TICKER_BLOCKLIST = new Set([
+  "THE",
+  "AND",
+  "FOR",
+  "ARE",
+  "BUT",
+  "NOT",
+  "YOU",
+  "ALL",
+  "CAN",
+  "DAY",
+  "IPO",
+  "EPS",
+  "CEO",
+  "CFO",
+  "USA",
+  "FED",
+  "GDP",
+  "CPI",
+]);
+
+const COMPANY_ALIASES: Record<string, string> = {
+  palantir: "PLTR",
+  apple: "AAPL",
+  nvidia: "NVDA",
+  microsoft: "MSFT",
+  google: "GOOGL",
+  alphabet: "GOOGL",
+  amazon: "AMZN",
+  tesla: "TSLA",
+  meta: "META",
+  facebook: "META",
+  netflix: "NFLX",
+  amd: "AMD",
+  intel: "INTC",
+  "s&p 500": "SPY",
+  "s&p500": "SPY",
+  sp500: "SPY",
+  "spy etf": "SPY",
+};
 
 type NewsArticle = {
   headline: string;
@@ -33,8 +75,66 @@ type NewsArticle = {
   datetime: string;
 };
 
-const NEWS_TICKERS_POSITIONS = "AAPL,NVDA,SPY";
-const NEWS_TICKERS_MARKET = "SPY,QQQ,IWM,DIA";
+type SentimentLabel = "Bullish" | "Bearish" | "Neutral";
+
+type SentimentState = {
+  sentimentScore: number;
+  sentimentLabel: SentimentLabel;
+  summary: string;
+};
+
+function formatScopeLabel(tickersCsv: string): string {
+  return tickersCsv
+    .split(",")
+    .map((t) => t.trim().toUpperCase())
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function extractTickerFromPrompt(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  const lower = trimmed.toLowerCase().replace(/\s+/g, " ");
+  for (const [phrase, sym] of Object.entries(COMPANY_ALIASES)) {
+    if (lower.includes(phrase)) return sym;
+  }
+
+  const dollar = trimmed.match(/\$([A-Za-z]{1,5})\b/);
+  if (dollar) return dollar[1].toUpperCase();
+
+  const upperTokens = trimmed.match(/\b[A-Z]{2,5}\b/g);
+  if (upperTokens) {
+    for (const t of upperTokens) {
+      if (!TICKER_BLOCKLIST.has(t)) return t;
+    }
+  }
+
+  return null;
+}
+
+function sentimentStyles(label: SentimentLabel): {
+  badge: string;
+  ring: string;
+} {
+  if (label === "Bullish") {
+    return {
+      badge:
+        "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/35",
+      ring: "border-emerald-500/25",
+    };
+  }
+  if (label === "Bearish") {
+    return {
+      badge: "bg-red-500/20 text-red-200 ring-1 ring-red-500/35",
+      ring: "border-red-500/25",
+    };
+  }
+  return {
+    badge: "bg-amber-500/15 text-amber-100 ring-1 ring-amber-500/35",
+    ring: "border-amber-500/25",
+  };
+}
 
 function formatTimeAgo(iso: string): string {
   const t = new Date(iso).getTime();
@@ -110,49 +210,109 @@ const MOCK_POSITIONS = [
 ];
 
 export function DashboardClient() {
-  const [newsTab, setNewsTab] = useState<NewsTab>("positions");
   const [newsArticles, setNewsArticles] = useState<NewsArticle[]>([]);
+  const [feedTickersCsv, setFeedTickersCsv] =
+    useState(DEFAULT_NEWS_TICKERS);
+  const [sentiment, setSentiment] = useState<SentimentState | null>(null);
+  const [sentimentWarning, setSentimentWarning] = useState<string | null>(
+    null,
+  );
   const [newsLoading, setNewsLoading] = useState(true);
   const [newsError, setNewsError] = useState<string | null>(null);
+
   const [query, setQuery] = useState("");
   const [briefingText, setBriefingText] = useState(DEFAULT_BRIEFING);
   const [isBriefingLoading, setIsBriefingLoading] = useState(false);
   const [briefingError, setBriefingError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const tickers =
-      newsTab === "positions"
-        ? NEWS_TICKERS_POSITIONS
-        : NEWS_TICKERS_MARKET;
-    const ac = new AbortController();
+  const loadNewsFeed = useCallback(async (tickersCsv: string) => {
     setNewsLoading(true);
     setNewsError(null);
+    setSentiment(null);
+    setSentimentWarning(null);
+    setFeedTickersCsv(tickersCsv);
 
-    fetch(`/api/news?tickers=${encodeURIComponent(tickers)}`, {
-      signal: ac.signal,
-    })
-      .then(async (res) => {
-        const data = (await res.json()) as {
-          articles?: NewsArticle[];
-          error?: string;
-        };
-        if (!res.ok) {
-          throw new Error(data.error ?? "Failed to load news");
-        }
-        setNewsArticles(Array.isArray(data.articles) ? data.articles : []);
-        setNewsLoading(false);
-      })
-      .catch((err: unknown) => {
-        if (err instanceof Error && err.name === "AbortError") return;
-        setNewsArticles([]);
-        setNewsError(
-          err instanceof Error ? err.message : "Could not load news.",
-        );
-        setNewsLoading(false);
+    try {
+      const newsRes = await fetch(
+        `/api/news?tickers=${encodeURIComponent(tickersCsv)}&limit=10`,
+      );
+      const newsData = (await newsRes.json()) as {
+        articles?: NewsArticle[];
+        error?: string;
+      };
+      if (!newsRes.ok) {
+        throw new Error(newsData.error ?? "Failed to load news");
+      }
+      const articles = Array.isArray(newsData.articles)
+        ? newsData.articles.slice(0, 10)
+        : [];
+      setNewsArticles(articles);
+
+      const tickerArr = tickersCsv
+        .split(",")
+        .map((t) => t.trim().toUpperCase())
+        .filter(Boolean);
+
+      if (articles.length === 0 || tickerArr.length === 0) {
+        setSentiment(null);
+        return;
+      }
+
+      const sentRes = await fetch("/api/sentiment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tickers: tickerArr,
+          headlines: articles.map((a) => ({
+            headline: a.headline,
+            summary: a.summary,
+          })),
+        }),
       });
+      const sentData = (await sentRes.json()) as {
+        sentimentScore?: number;
+        sentimentLabel?: SentimentLabel;
+        summary?: string;
+        error?: string;
+      };
 
-    return () => ac.abort();
-  }, [newsTab]);
+      if (!sentRes.ok) {
+        setSentimentWarning(
+          sentData.error ?? "Could not analyze sentiment for these headlines.",
+        );
+        setSentiment(null);
+        return;
+      }
+
+      let label: SentimentLabel = "Neutral";
+      if (sentData.sentimentLabel === "Bullish") label = "Bullish";
+      else if (sentData.sentimentLabel === "Bearish") label = "Bearish";
+
+      setSentiment({
+        sentimentScore: Math.min(
+          100,
+          Math.max(0, Number(sentData.sentimentScore ?? 50)),
+        ),
+        sentimentLabel: label,
+        summary:
+          typeof sentData.summary === "string"
+            ? sentData.summary.trim()
+            : "",
+      });
+    } catch (e) {
+      setNewsArticles([]);
+      setSentiment(null);
+      setNewsError(
+        e instanceof Error ? e.message : "Could not load the news feed.",
+      );
+    } finally {
+      setNewsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadNewsFeed(DEFAULT_NEWS_TICKERS);
+  }, [loadNewsFeed]);
 
   const fetchBriefing = useCallback(async (userMessage: string) => {
     setIsBriefingLoading(true);
@@ -185,13 +345,29 @@ export function DashboardClient() {
 
   const handleAsk = () => {
     const trimmed = query.trim();
+    const resolvedTicker = extractTickerFromPrompt(trimmed);
+
+    if (resolvedTicker) {
+      void loadNewsFeed(resolvedTicker);
+      void fetchBriefing(trimmed);
+      return;
+    }
+
     void fetchBriefing(trimmed || DASHBOARD_DEFAULT_MESSAGE);
   };
 
   const handleChip = (chip: (typeof CHIPS)[number]) => {
     setQuery(chip);
+    if (chip === "News on my positions") {
+      void loadNewsFeed(DEFAULT_NEWS_TICKERS);
+    }
     void fetchBriefing(chip);
   };
+
+  const scopeDisplay = useMemo(
+    () => formatScopeLabel(feedTickersCsv),
+    [feedTickersCsv],
+  );
 
   const { greeting, dateLabel } = useMemo(() => {
     const now = new Date();
@@ -210,6 +386,10 @@ export function DashboardClient() {
     });
     return { greeting, dateLabel };
   }, []);
+
+  const sentimentUi = sentiment
+    ? sentimentStyles(sentiment.sentimentLabel)
+    : null;
 
   return (
     <AppChrome>
@@ -333,45 +513,40 @@ export function DashboardClient() {
           <div className="border-b border-zinc-800/80 px-5 py-4">
             <h2 className="text-sm font-semibold text-white">News</h2>
             <p className="mt-0.5 text-xs text-zinc-500">
-              Company headlines via Finnhub (last 30 days)
+              {scopeDisplay} · up to 10 headlines (Finnhub, last 30 days)
             </p>
-            <div
-              className="mt-4 flex gap-1 rounded-lg border border-zinc-800/80 bg-zinc-950/50 p-1"
-              role="tablist"
-              aria-label="News feed category"
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={newsTab === "positions"}
-                className={`min-h-9 flex-1 rounded-md px-3 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 ${
-                  newsTab === "positions"
-                    ? "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-500/25"
-                    : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
-                }`}
-                onClick={() => setNewsTab("positions")}
+
+            {!newsLoading && sentiment && sentimentUi && (
+              <div
+                className={`mt-4 rounded-xl border bg-zinc-950/50 p-4 ${sentimentUi.ring}`}
               >
-                My Positions
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={newsTab === "market"}
-                className={`min-h-9 flex-1 rounded-md px-3 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 ${
-                  newsTab === "market"
-                    ? "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-500/25"
-                    : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
-                }`}
-                onClick={() => setNewsTab("market")}
-              >
-                General Market
-              </button>
-            </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span
+                    className={`inline-flex items-center rounded-lg px-3 py-1.5 text-sm font-semibold tabular-nums ${sentimentUi.badge}`}
+                  >
+                    {sentiment.sentimentScore}
+                  </span>
+                  <span
+                    className={`rounded-md px-2.5 py-1 text-xs font-semibold uppercase tracking-wide ${sentimentUi.badge}`}
+                  >
+                    {sentiment.sentimentLabel}
+                  </span>
+                </div>
+                <p className="mt-3 text-sm leading-relaxed text-zinc-300">
+                  {sentiment.summary}
+                </p>
+              </div>
+            )}
+
+            {!newsLoading && sentimentWarning && (
+              <p className="mt-3 text-xs text-amber-400/90">{sentimentWarning}</p>
+            )}
           </div>
+
           <ul className="divide-y divide-white/5">
             {newsLoading ? (
               <li className="px-5 py-10 text-center text-sm text-zinc-500">
-                Loading headlines…
+                Loading headlines and sentiment…
               </li>
             ) : newsError ? (
               <li className="px-5 py-8 text-center text-sm text-red-400/90">
@@ -379,7 +554,7 @@ export function DashboardClient() {
               </li>
             ) : newsArticles.length === 0 ? (
               <li className="px-5 py-8 text-center text-sm text-zinc-500">
-                No articles in this window. Try again later.
+                No articles in this window. Try another ticker or later.
               </li>
             ) : (
               newsArticles.map((item, i) => (
