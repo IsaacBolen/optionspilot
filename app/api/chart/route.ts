@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { polygonFetch } from "@/lib/polygon-fetch";
 
 type PolygonAggBar = {
   T?: number;
@@ -38,7 +39,7 @@ export async function GET(request: NextRequest) {
   const url = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(ticker)}/range/1/hour/${fromDate}/${toDate}?adjusted=true&sort=asc&limit=5000&apiKey=${encodeURIComponent(key)}`;
 
   try {
-    const res = await fetch(url, { next: { revalidate: 60 } });
+    const res = await polygonFetch(url, 60);
     const json: unknown = await res.json();
     if (!res.ok) {
       const msg =
