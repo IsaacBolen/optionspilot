@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { AppChrome } from "../components/app-chrome";
 
@@ -124,106 +118,56 @@ const DEFAULT_ROWS: ScreenerRow[] = [
   },
 ];
 
-const REFINED_STATS: StatCard[] = [
-  {
-    label: "Opportunities Found",
-    value: "18",
-    hint: "AI-ranked for your prompt",
-  },
-  {
-    label: "Highest Signal",
-    value: "META Call",
-    hint: "Top-ranked setup",
-    valueClass: "text-emerald-400",
-  },
-  {
-    label: "Avg IV Rank",
-    value: "64%",
-    hint: "Across screened names",
-  },
-];
+const DEFAULT_AI_BLURB =
+  "Run a scan with Find Trades or a chip to generate Claude-ranked picks.";
 
-const REFINED_ROWS: ScreenerRow[] = [
-  {
-    ticker: "META",
-    type: "Call",
-    strike: 485,
-    expiration: "May 23, 2025",
-    ivRank: 58,
-    volume: 9800,
-    signalScore: 91,
-  },
-  {
-    ticker: "GOOGL",
-    type: "Call",
-    strike: 165,
-    expiration: "May 16, 2025",
-    ivRank: 52,
-    volume: 7200,
-    signalScore: 86,
-  },
-  {
-    ticker: "QQQ",
-    type: "Put",
-    strike: 445,
-    expiration: "Jun 6, 2025",
-    ivRank: 71,
-    volume: 18400,
-    signalScore: 83,
-  },
-  {
-    ticker: "AMZN",
-    type: "Call",
-    strike: 182,
-    expiration: "May 9, 2025",
-    ivRank: 61,
-    volume: 5600,
-    signalScore: 80,
-  },
-  {
-    ticker: "IWM",
-    type: "Put",
-    strike: 198,
-    expiration: "May 30, 2025",
-    ivRank: 66,
-    volume: 4300,
-    signalScore: 76,
-  },
-  {
-    ticker: "SMCI",
-    type: "Call",
-    strike: 820,
-    expiration: "Jun 20, 2025",
-    ivRank: 88,
-    volume: 11200,
-    signalScore: 89,
-  },
-];
+const SCREENER_DEFAULT_MESSAGE =
+  "Suggest a handful of liquid US equity options that could fit a balanced bullish-bias book over the next few weeks.";
 
-const ANALYSIS_MS = 1500;
+function statsFromPicks(picks: ScreenerRow[]): StatCard[] {
+  const n = picks.length;
+  if (n === 0) return DEFAULT_STATS;
+  const top = picks.reduce((a, b) =>
+    b.signalScore > a.signalScore ? b : a,
+  );
+  const avgIv = Math.round(
+    picks.reduce((s, p) => s + p.ivRank, 0) / n,
+  );
+  return [
+    {
+      label: "Opportunities Found",
+      value: String(n),
+      hint: "Matching your criteria",
+    },
+    {
+      label: "Highest Signal",
+      value: `${top.ticker} ${top.type}`,
+      hint: "Top-ranked setup",
+      valueClass: "text-emerald-400",
+    },
+    {
+      label: "Avg IV Rank",
+      value: `${avgIv}%`,
+      hint: "Across screened names",
+    },
+  ];
+}
 
 export function ScreenerClient() {
   const [prompt, setPrompt] = useState("");
   const [screenerFilter, setScreenerFilter] =
     useState<ScreenerFilter>("all");
-  const [refinedResultsActive, setRefinedResultsActive] = useState(false);
+  const [picksRows, setPicksRows] = useState<ScreenerRow[]>(DEFAULT_ROWS);
+  const [statCards, setStatCards] = useState<StatCard[]>(DEFAULT_STATS);
+  const [aiPicksBlurb, setAiPicksBlurb] = useState(DEFAULT_AI_BLURB);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    };
-  }, []);
-
-  const stats = refinedResultsActive ? REFINED_STATS : DEFAULT_STATS;
-  const baseRows = refinedResultsActive ? REFINED_ROWS : DEFAULT_ROWS;
+  const [scanError, setScanError] = useState<string | null>(null);
 
   const filteredScreenerRows = useMemo(() => {
     const HIGH_IV_MIN = 75;
     const UNUSUAL_VOL_MIN = 8000;
 
-    return baseRows.filter((row) => {
+    return picksRows.filter((row) => {
       if (screenerFilter === "calls") return row.type === "Call";
       if (screenerFilter === "puts") return row.type === "Put";
       if (screenerFilter === "highIv") return row.ivRank >= HIGH_IV_MIN;
@@ -231,7 +175,7 @@ export function ScreenerClient() {
         return row.volume >= UNUSUAL_VOL_MIN;
       return true;
     });
-  }, [baseRows, screenerFilter]);
+  }, [picksRows, screenerFilter]);
 
   const screenerFilters: { id: ScreenerFilter; label: string }[] = [
     { id: "all", label: "All" },
@@ -241,23 +185,53 @@ export function ScreenerClient() {
     { id: "unusualVol", label: "Unusual Volume" },
   ];
 
-  const runSearch = useCallback(() => {
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+  const runSearch = useCallback(async (message: string) => {
     setIsAnalyzing(true);
-    timeoutRef.current = setTimeout(() => {
+    setScanError(null);
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message,
+          context: "screener",
+        }),
+      });
+      const data = (await res.json()) as {
+        summary?: string;
+        picks?: ScreenerRow[];
+        error?: string;
+      };
+      if (!res.ok) {
+        throw new Error(data.error ?? "Scan failed");
+      }
+      const picks = Array.isArray(data.picks) ? data.picks : [];
+      const summary =
+        typeof data.summary === "string" ? data.summary.trim() : "";
+      if (!summary || picks.length < 3) {
+        throw new Error(
+          data.error ?? "Assistant returned too few picks. Try again.",
+        );
+      }
+      setPicksRows(picks);
+      setStatCards(statsFromPicks(picks));
+      setAiPicksBlurb(summary);
+    } catch (e) {
+      setScanError(
+        e instanceof Error ? e.message : "Could not complete the scan.",
+      );
+    } finally {
       setIsAnalyzing(false);
-      setRefinedResultsActive((prev) => !prev);
-      timeoutRef.current = null;
-    }, ANALYSIS_MS);
+    }
   }, []);
 
   const handleFindTrades = () => {
-    runSearch();
+    void runSearch(prompt.trim() || SCREENER_DEFAULT_MESSAGE);
   };
 
   const handleExampleChip = (text: string) => {
     setPrompt(text);
-    runSearch();
+    void runSearch(text);
   };
 
   return (
@@ -287,7 +261,8 @@ export function ScreenerClient() {
                   onChange={(e) => setPrompt(e.target.value)}
                   placeholder={PLACEHOLDER}
                   rows={5}
-                  className="relative z-10 min-h-[140px] w-full resize-y rounded-2xl border border-zinc-700/80 bg-zinc-950/90 px-4 py-3.5 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-600 focus:border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 sm:text-base"
+                  disabled={isAnalyzing}
+                  className="relative z-10 min-h-[140px] w-full resize-y rounded-2xl border border-zinc-700/80 bg-zinc-950/90 px-4 py-3.5 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-600 focus:border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 disabled:opacity-60 sm:text-base"
                   aria-label="Describe the trade you are looking for"
                 />
               </div>
@@ -334,10 +309,16 @@ export function ScreenerClient() {
             </div>
           )}
 
+          {scanError && !isAnalyzing && (
+            <div className="mb-4 rounded-xl border border-red-500/30 bg-red-950/40 px-4 py-3 text-sm text-red-200/95">
+              {scanError}
+            </div>
+          )}
+
           <section
             className={`mb-8 grid gap-4 sm:grid-cols-3 ${isAnalyzing ? "pointer-events-none opacity-40" : ""}`}
           >
-            {stats.map((card) => (
+            {statCards.map((card) => (
               <div
                 key={card.label}
                 className="rounded-2xl border border-zinc-800/80 bg-zinc-900/60 p-5 shadow-sm shadow-black/20 ring-1 ring-inset ring-white/5 backdrop-blur-sm"
@@ -362,8 +343,8 @@ export function ScreenerClient() {
           >
             <div className="border-b border-zinc-800/80 px-5 py-4">
               <h2 className="text-sm font-semibold text-white">AI Picks</h2>
-              <p className="mt-0.5 text-xs text-zinc-500">
-                Mock signals and liquidity for layout preview
+              <p className="mt-0.5 text-xs leading-relaxed text-zinc-500">
+                {aiPicksBlurb}
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
                 {screenerFilters.map((f) => (
@@ -399,7 +380,7 @@ export function ScreenerClient() {
                 <tbody className="divide-y divide-white/5">
                   {filteredScreenerRows.map((row, i) => (
                     <tr
-                      key={`${row.ticker}-${row.strike}-${row.type}-${i}-${refinedResultsActive ? "r" : "d"}`}
+                      key={`${row.ticker}-${row.strike}-${row.type}-${i}`}
                       className="text-zinc-300 transition hover:bg-white/[0.02]"
                     >
                       <td className="px-5 py-4 font-medium text-white">

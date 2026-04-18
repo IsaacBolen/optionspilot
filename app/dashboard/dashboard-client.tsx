@@ -4,7 +4,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import { AppChrome } from "../components/app-chrome";
@@ -18,22 +17,11 @@ const CHIPS = [
   "How are my positions?",
 ] as const;
 
-const MOCK_RESPONSES: Record<(typeof CHIPS)[number], string> = {
-  "News on my positions":
-    "Wire stories on AAPL, NVDA, and SPY are clustered around iPhone channel checks, AI datacenter spend, and index rebalancing—those three names explain most of the P&L drift in your open book today.",
-  "What's moving today?":
-    "Semiconductors and mega-cap tech are seeing the bulk of flow again, with single-stock calls leading volume. Defensive sectors are lagging. Unusual activity is clustered in weekly expiries—worth scanning for gamma squeezes into Friday.",
-  "How are my positions?":
-    "You have three open legs: AAPL is working in your favor with IV still contained; NVDA’s put is slightly underwater but within a normal premium drift range; SPY’s call is tracking the broader tape. No single name is at max risk—consider partial trims if any position crosses 40% of your intended max loss.",
-};
-
-const CUSTOM_RESPONSE_PREFIX =
-  "Here’s a quick read based on what you asked: implied volatility is still elevated versus the 30-day median, so directional trades need tighter risk. ";
-
 const INPUT_PLACEHOLDER =
   "Ask about market news, your positions, or anything trading related...";
 
-const LOADING_MS = 1000;
+const DASHBOARD_DEFAULT_MESSAGE =
+  "Give a very brief morning-style read on markets and how it might relate to my AAPL, NVDA, and SPY options.";
 
 type NewsTab = "positions" | "market";
 
@@ -129,17 +117,7 @@ export function DashboardClient() {
   const [query, setQuery] = useState("");
   const [briefingText, setBriefingText] = useState(DEFAULT_BRIEFING);
   const [isBriefingLoading, setIsBriefingLoading] = useState(false);
-  const briefingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-
-  useEffect(() => {
-    return () => {
-      if (briefingTimeoutRef.current) {
-        clearTimeout(briefingTimeoutRef.current);
-      }
-    };
-  }, []);
+  const [briefingError, setBriefingError] = useState<string | null>(null);
 
   useEffect(() => {
     const tickers =
@@ -176,29 +154,43 @@ export function DashboardClient() {
     return () => ac.abort();
   }, [newsTab]);
 
-  const runBriefingRequest = useCallback((responseText: string) => {
-    if (briefingTimeoutRef.current) {
-      clearTimeout(briefingTimeoutRef.current);
-    }
+  const fetchBriefing = useCallback(async (userMessage: string) => {
     setIsBriefingLoading(true);
-    briefingTimeoutRef.current = setTimeout(() => {
-      setBriefingText(responseText);
+    setBriefingError(null);
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: userMessage,
+          context: "dashboard",
+        }),
+      });
+      const data = (await res.json()) as { reply?: string; error?: string };
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to get briefing");
+      }
+      if (!data.reply?.trim()) {
+        throw new Error("Empty response from assistant");
+      }
+      setBriefingText(data.reply.trim());
+    } catch (e) {
+      setBriefingError(
+        e instanceof Error ? e.message : "Could not reach the assistant.",
+      );
+    } finally {
       setIsBriefingLoading(false);
-      briefingTimeoutRef.current = null;
-    }, LOADING_MS);
+    }
   }, []);
 
   const handleAsk = () => {
     const trimmed = query.trim();
-    const text = trimmed
-      ? `${CUSTOM_RESPONSE_PREFIX}${trimmed.length > 220 ? `${trimmed.slice(0, 220)}…` : trimmed}`
-      : MOCK_RESPONSES["What's moving today?"];
-    runBriefingRequest(text);
+    void fetchBriefing(trimmed || DASHBOARD_DEFAULT_MESSAGE);
   };
 
   const handleChip = (chip: (typeof CHIPS)[number]) => {
     setQuery(chip);
-    runBriefingRequest(MOCK_RESPONSES[chip]);
+    void fetchBriefing(chip);
   };
 
   const { greeting, dateLabel } = useMemo(() => {
@@ -271,6 +263,10 @@ export function DashboardClient() {
                 />
                 <span>Thinking…</span>
               </div>
+            ) : briefingError ? (
+              <p className="text-sm leading-relaxed text-red-400/90">
+                {briefingError}
+              </p>
             ) : (
               <p className="text-sm leading-relaxed text-zinc-400">
                 {briefingText}
