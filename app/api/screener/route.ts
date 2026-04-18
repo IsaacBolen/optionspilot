@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 
+import { enrichPicksWithPolygonPriceChanges } from "@/lib/enrich-screener-picks";
+
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 const POLYGON_KEY = process.env.POLYGON_API_KEY!;
 
@@ -27,7 +29,9 @@ Score and select the best 5-7 contracts. Return ONLY a JSON object:
       "expiration": "May 16, 2025",
       "ivRank": 65,
       "volume": 4200,
-      "signalScore": 78
+      "signalScore": 78,
+      "estPremium": 2.45,
+      "premiumRange": "$1.80 - $3.20"
     }
   ]
 }
@@ -38,6 +42,8 @@ Rules:
 - volume: use the real volume from the data
 - signalScore: your 0-100 ranking of this contract's opportunity quality
 - expiration: human-readable like "May 16, 2025"
+- estPremium: number, realistic estimated price per contract in dollars (e.g. 2.45), aligned with strike, expiry, and IV from the data
+- premiumRange: string like "$1.80 - $3.20" for a plausible bid/ask range for that contract
 No markdown, no commentary, just the JSON object.`;
 
 type ScreenerPick = {
@@ -48,6 +54,10 @@ type ScreenerPick = {
   ivRank: number;
   volume: number;
   signalScore: number;
+  estPremium: number | null;
+  premiumRange: string;
+  change24h: number | null;
+  change1w: number | null;
 };
 
 function extractJson(text: string): unknown {
@@ -70,8 +80,27 @@ function normalizePick(raw: unknown): ScreenerPick | null {
   const ivRank = Math.min(100, Math.max(0, Math.round(Number(o.ivRank))));
   const volume = Math.max(0, Math.round(Number(o.volume)));
   const signalScore = Math.min(100, Math.max(0, Math.round(Number(o.signalScore))));
+  const estRaw = Number(o.estPremium);
+  const estPremium =
+    Number.isFinite(estRaw) && estRaw >= 0
+      ? Math.round(estRaw * 100) / 100
+      : null;
+  const pr = String(o.premiumRange ?? "").trim();
+  const premiumRange = pr.length > 0 ? pr : "—";
   if (!ticker || !expiration || !Number.isFinite(strike)) return null;
-  return { ticker, type, strike, expiration, ivRank, volume, signalScore };
+  return {
+    ticker,
+    type,
+    strike,
+    expiration,
+    ivRank,
+    volume,
+    signalScore,
+    estPremium,
+    premiumRange,
+    change24h: null,
+    change1w: null,
+  };
 }
 
 async function sleep(ms: number) {
@@ -188,17 +217,22 @@ Pick the best 5-7 contracts and return the JSON.`;
 
     const ranked = extractJson(rankText) as Record<string, unknown>;
     const summary = typeof ranked.summary === "string" ? ranked.summary.trim() : "";
-    const picks = (Array.isArray(ranked.picks) ? ranked.picks : [])
+    const picksNormalized = (Array.isArray(ranked.picks) ? ranked.picks : [])
       .map(normalizePick)
       .filter((p): p is ScreenerPick => p !== null)
       .slice(0, 7);
 
-    if (!summary || picks.length < 3) {
+    if (!summary || picksNormalized.length < 3) {
       return NextResponse.json(
         { error: "Could not rank contracts. Try again." },
         { status: 502 }
       );
     }
+
+    const picks = await enrichPicksWithPolygonPriceChanges(
+      picksNormalized,
+      POLYGON_KEY,
+    );
 
     return NextResponse.json({ summary, picks });
 

@@ -14,6 +14,10 @@ type ScreenerRow = {
   ivRank: number;
   volume: number;
   signalScore: number;
+  estPremium: number | null;
+  premiumRange: string;
+  change24h: number | null;
+  change1w: number | null;
 };
 
 type StatCard = {
@@ -61,6 +65,10 @@ const DEFAULT_ROWS: ScreenerRow[] = [
     ivRank: 91,
     volume: 12400,
     signalScore: 94,
+    estPremium: 4.85,
+    premiumRange: "$4.20 - $5.50",
+    change24h: 1.2,
+    change1w: 3.4,
   },
   {
     ticker: "NVDA",
@@ -70,6 +78,10 @@ const DEFAULT_ROWS: ScreenerRow[] = [
     ivRank: 84,
     volume: 9100,
     signalScore: 88,
+    estPremium: 2.1,
+    premiumRange: "$1.65 - $2.55",
+    change24h: -0.8,
+    change1w: 2.1,
   },
   {
     ticker: "AAPL",
@@ -79,6 +91,10 @@ const DEFAULT_ROWS: ScreenerRow[] = [
     ivRank: 68,
     volume: 4200,
     signalScore: 78,
+    estPremium: 3.25,
+    premiumRange: "$2.80 - $3.70",
+    change24h: 0.4,
+    change1w: -1.2,
   },
   {
     ticker: "SPY",
@@ -88,6 +104,10 @@ const DEFAULT_ROWS: ScreenerRow[] = [
     ivRank: 55,
     volume: 15200,
     signalScore: 72,
+    estPremium: 6.4,
+    premiumRange: "$5.90 - $6.90",
+    change24h: 0.15,
+    change1w: 0.9,
   },
   {
     ticker: "AMD",
@@ -97,6 +117,10 @@ const DEFAULT_ROWS: ScreenerRow[] = [
     ivRank: 77,
     volume: 6100,
     signalScore: 81,
+    estPremium: 1.95,
+    premiumRange: "$1.50 - $2.40",
+    change24h: -1.1,
+    change1w: -2.3,
   },
   {
     ticker: "MSFT",
@@ -106,6 +130,10 @@ const DEFAULT_ROWS: ScreenerRow[] = [
     ivRank: 49,
     volume: 3800,
     signalScore: 69,
+    estPremium: 5.1,
+    premiumRange: "$4.60 - $5.60",
+    change24h: 0.22,
+    change1w: 1.05,
   },
   {
     ticker: "AAPL",
@@ -115,11 +143,71 @@ const DEFAULT_ROWS: ScreenerRow[] = [
     ivRank: 62,
     volume: 8900,
     signalScore: 75,
+    estPremium: 1.4,
+    premiumRange: "$1.10 - $1.70",
+    change24h: 0.4,
+    change1w: -1.2,
   },
 ];
 
 const SCREENER_DEFAULT_MESSAGE =
   "Suggest a handful of liquid US equity options that could fit a balanced bullish-bias book over the next few weeks.";
+
+function formatEstPremium(est: number | null | undefined): string {
+  if (est == null || !Number.isFinite(est)) return "—";
+  return `$${est.toFixed(2)}`;
+}
+
+function change1wClass(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n) || n === 0) return "text-zinc-400";
+  return n > 0 ? "text-emerald-400" : "text-red-400";
+}
+
+function formatChange1w(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  const sign = n > 0 ? "+" : "";
+  return `${sign}${n.toFixed(2)}%`;
+}
+
+function normalizePickFromApi(raw: unknown): ScreenerRow | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const ticker = String(o.ticker ?? "").trim().toUpperCase();
+  const typeRaw = String(o.type ?? "").trim();
+  const type = typeRaw === "Put" ? "Put" : "Call";
+  const strike = Number(o.strike);
+  const expiration = String(o.expiration ?? "").trim();
+  const ivRank = Math.round(Number(o.ivRank));
+  const volume = Math.round(Number(o.volume));
+  const signalScore = Math.round(Number(o.signalScore));
+  const estRaw = Number(o.estPremium);
+  const estPremium =
+    Number.isFinite(estRaw) && estRaw >= 0
+      ? Math.round(estRaw * 100) / 100
+      : null;
+  const pr = String(o.premiumRange ?? "").trim();
+  const premiumRange = pr.length > 0 ? pr : "—";
+  const c24 = Number(o.change24h);
+  const c1w = Number(o.change1w);
+  const change24h = Number.isFinite(c24) ? Math.round(c24 * 100) / 100 : null;
+  const change1w = Number.isFinite(c1w) ? Math.round(c1w * 100) / 100 : null;
+  if (!ticker || !expiration || !Number.isFinite(strike)) return null;
+  if (!Number.isFinite(ivRank) || !Number.isFinite(volume)) return null;
+  if (!Number.isFinite(signalScore)) return null;
+  return {
+    ticker,
+    type,
+    strike,
+    expiration,
+    ivRank: Math.min(100, Math.max(0, ivRank)),
+    volume: Math.max(0, volume),
+    signalScore: Math.min(100, Math.max(0, signalScore)),
+    estPremium,
+    premiumRange,
+    change24h,
+    change1w,
+  };
+}
 
 function statsFromPicks(picks: ScreenerRow[]): StatCard[] {
   const n = picks.length;
@@ -163,7 +251,7 @@ export function ScreenerClient() {
     const HIGH_IV_MIN = 75;
     const UNUSUAL_VOL_MIN = 8000;
 
-    return picksRows.filter((row) => {
+    const filtered = picksRows.filter((row) => {
       if (screenerFilter === "calls") return row.type === "Call";
       if (screenerFilter === "puts") return row.type === "Put";
       if (screenerFilter === "highIv") return row.ivRank >= HIGH_IV_MIN;
@@ -171,6 +259,7 @@ export function ScreenerClient() {
         return row.volume >= UNUSUAL_VOL_MIN;
       return true;
     });
+    return [...filtered].sort((a, b) => b.signalScore - a.signalScore);
   }, [picksRows, screenerFilter]);
 
   const screenerFilters: { id: ScreenerFilter; label: string }[] = [
@@ -201,7 +290,10 @@ export function ScreenerClient() {
       if (!res.ok) {
         throw new Error(data.error ?? "Scan failed");
       }
-      const picks = Array.isArray(data.picks) ? data.picks : [];
+      const rawPicks = Array.isArray(data.picks) ? data.picks : [];
+      const picks = rawPicks
+        .map(normalizePickFromApi)
+        .filter((p): p is ScreenerRow => p !== null);
       const summary =
         typeof data.summary === "string" ? data.summary.trim() : "";
       if (!summary || picks.length < 3) {
@@ -209,8 +301,9 @@ export function ScreenerClient() {
           data.error ?? "Assistant returned too few picks. Try again.",
         );
       }
-      setPicksRows(picks);
-      setStatCards(statsFromPicks(picks));
+      const sorted = [...picks].sort((a, b) => b.signalScore - a.signalScore);
+      setPicksRows(sorted);
+      setStatCards(statsFromPicks(sorted));
     } catch (e) {
       setScanError(
         e instanceof Error ? e.message : "Could not complete the scan.",
@@ -361,7 +454,7 @@ export function ScreenerClient() {
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[880px] text-left text-sm">
+              <table className="w-full min-w-[1040px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-zinc-800/80 bg-zinc-950/40 text-xs font-medium uppercase tracking-wider text-zinc-500">
                     <th className="px-5 py-3.5">Ticker</th>
@@ -370,6 +463,8 @@ export function ScreenerClient() {
                     <th className="px-5 py-3.5">Expiration</th>
                     <th className="px-5 py-3.5 text-right">IV Rank</th>
                     <th className="px-5 py-3.5 text-right">Volume</th>
+                    <th className="px-5 py-3.5 text-right">Est. Premium</th>
+                    <th className="px-5 py-3.5 text-right">1W Change</th>
                     <th className="px-5 py-3.5 text-right">Signal Score</th>
                   </tr>
                 </thead>
@@ -404,6 +499,14 @@ export function ScreenerClient() {
                       </td>
                       <td className="px-5 py-4 text-right tabular-nums">
                         {row.volume.toLocaleString("en-US")}
+                      </td>
+                      <td className="px-5 py-4 text-right tabular-nums text-zinc-200">
+                        {formatEstPremium(row.estPremium)}
+                      </td>
+                      <td
+                        className={`px-5 py-4 text-right tabular-nums font-medium ${change1wClass(row.change1w)}`}
+                      >
+                        {formatChange1w(row.change1w)}
                       </td>
                       <td className="px-5 py-4 text-right tabular-nums font-medium text-emerald-400">
                         {row.signalScore}

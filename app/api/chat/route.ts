@@ -1,11 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 
+import { enrichPicksWithPolygonPriceChanges } from "@/lib/enrich-screener-picks";
+
 /** Dashboard news headline sentiment is handled separately by `app/api/sentiment/route.ts`. */
 
 const DASHBOARD_SYSTEM = `You are an AI trading assistant for OptionsPilot. The user is asking about market news, their positions (AAPL call $185 strike, NVDA put $118 strike, SPY call $520 strike), or general trading questions. Keep responses concise, 2-3 sentences max, conversational and helpful.`;
 
-const SCREENER_SYSTEM = `You are an AI options screener for OptionsPilot. The user will describe what kind of options trade they are looking for. Respond with a JSON object containing: summary (one sentence describing what you found), and picks (array of 5-7 options opportunities with fields: ticker, type, strike, expiration, ivRank, volume, signalScore). Make the picks realistic and relevant to what the user asked for.
+const SCREENER_SYSTEM = `You are an AI options screener for OptionsPilot. The user will describe what kind of options trade they are looking for. Respond with a JSON object containing: summary (one sentence describing what you found), and picks (array of 5-7 options opportunities with fields: ticker, type, strike, expiration, ivRank, volume, signalScore, estPremium, premiumRange). Make the picks realistic and relevant to what the user asked for.
 
 Rules:
 - Return ONLY a single JSON object, no markdown fences, no commentary before or after.
@@ -15,6 +17,8 @@ Rules:
 - volume is an integer (contracts or share-equivalent style number).
 - signalScore is an integer 0-100.
 - expiration is a human-readable date string like "May 16, 2025".
+- estPremium is a number: realistic estimated price per contract in dollars (e.g. 2.45 means $2.45 per contract), consistent with strike, DTE, and IV.
+- premiumRange is a string like "$1.80 - $3.20" for a plausible bid/ask range based on strike, expiry, and IV.
 
 Today's date is April 18, 2026. All expiration dates you generate must be in the future, after today's date.`;
 
@@ -26,6 +30,10 @@ type ScreenerPick = {
   ivRank: number;
   volume: number;
   signalScore: number;
+  estPremium: number | null;
+  premiumRange: string;
+  change24h: number | null;
+  change1w: number | null;
 };
 
 function getTextContent(response: Anthropic.Messages.Message): string {
@@ -61,6 +69,13 @@ function normalizePick(raw: unknown): ScreenerPick | null {
   const ivRank = Math.round(Number(o.ivRank));
   const volume = Math.round(Number(o.volume));
   const signalScore = Math.round(Number(o.signalScore));
+  const estRaw = Number(o.estPremium);
+  const estPremium =
+    Number.isFinite(estRaw) && estRaw >= 0
+      ? Math.round(estRaw * 100) / 100
+      : null;
+  const pr = String(o.premiumRange ?? "").trim();
+  const premiumRange = pr.length > 0 ? pr : "—";
   if (!ticker || !expiration || !Number.isFinite(strike)) return null;
   if (!Number.isFinite(ivRank) || !Number.isFinite(volume)) return null;
   if (!Number.isFinite(signalScore)) return null;
@@ -72,6 +87,10 @@ function normalizePick(raw: unknown): ScreenerPick | null {
     ivRank: Math.min(100, Math.max(0, ivRank)),
     volume: Math.max(0, volume),
     signalScore: Math.min(100, Math.max(0, signalScore)),
+    estPremium,
+    premiumRange,
+    change24h: null,
+    change1w: null,
   };
 }
 
@@ -155,12 +174,12 @@ export async function POST(request: Request) {
       typeof parsed.summary === "string" ? parsed.summary.trim() : "";
     const picksRaw = parsed.picks;
     const picksList = Array.isArray(picksRaw) ? picksRaw : [];
-    const picks = picksList
+    const picksNormalized = picksList
       .map(normalizePick)
       .filter((p): p is ScreenerPick => p !== null)
       .slice(0, 7);
 
-    if (!summary || picks.length < 3) {
+    if (!summary || picksNormalized.length < 3) {
       return NextResponse.json(
         {
           error:
@@ -169,6 +188,11 @@ export async function POST(request: Request) {
         { status: 502 },
       );
     }
+
+    const picks = await enrichPicksWithPolygonPriceChanges(
+      picksNormalized,
+      process.env.POLYGON_API_KEY,
+    );
 
     return NextResponse.json({ summary, picks });
   } catch (err) {
