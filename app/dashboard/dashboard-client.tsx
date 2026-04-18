@@ -181,6 +181,38 @@ function changeColorClass(p: number | null): string {
   return p > 0 ? "text-emerald-400" : "text-red-400";
 }
 
+function escapeHtmlForBriefing(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function applyBriefingInlineMarkdown(escapedLine: string): string {
+  let t = escapedLine;
+  t = t.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  t = t.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  return t;
+}
+
+/** Minimal markdown: `## heading`, `**bold**`, `*italic*` — HTML-escaped first. */
+function briefingMdToSanitizedHtml(md: string): string {
+  const lines = md.split(/\n/);
+  return lines
+    .map((line, i) => {
+      const trimmed = line.trim();
+      const header = trimmed.match(/^##\s+(.+)$/);
+      if (header) {
+        const inner = applyBriefingInlineMarkdown(escapeHtmlForBriefing(header[1]));
+        return `<div class="block text-base font-semibold tracking-tight text-white ${i > 0 ? "mt-3" : ""}">${inner}</div>`;
+      }
+      return applyBriefingInlineMarkdown(escapeHtmlForBriefing(line));
+    })
+    .join("<br />");
+}
+
 function MiniLineChart({ closes }: { closes: number[] }) {
   const values = closes.filter((x) => Number.isFinite(x));
   if (values.length < 2) {
@@ -580,9 +612,13 @@ export function DashboardClient() {
                 {briefingError}
               </p>
             ) : (
-              <p className="text-sm leading-relaxed text-zinc-400">
-                {briefingText}
-              </p>
+              <div
+                className="text-sm leading-relaxed text-zinc-400 [&_em]:text-zinc-300 [&_strong]:font-semibold [&_strong]:text-zinc-200"
+                // eslint-disable-next-line react/no-danger -- escaped + limited markdown tags only
+                dangerouslySetInnerHTML={{
+                  __html: briefingMdToSanitizedHtml(briefingText),
+                }}
+              />
             )}
           </div>
 
