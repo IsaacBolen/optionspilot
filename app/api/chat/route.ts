@@ -14,7 +14,9 @@ Rules:
 - ivRank is an integer 0-100.
 - volume is an integer (contracts or share-equivalent style number).
 - signalScore is an integer 0-100.
-- expiration is a human-readable date string like "May 16, 2025".`;
+- expiration is a human-readable date string like "May 16, 2025".
+
+Today's date is April 18, 2026. All expiration dates you generate must be in the future, after today's date.`;
 
 type ScreenerPick = {
   ticker: string;

@@ -118,9 +118,6 @@ const DEFAULT_ROWS: ScreenerRow[] = [
   },
 ];
 
-const DEFAULT_AI_BLURB =
-  "Run a scan with Find Trades or a chip to generate Claude-ranked picks.";
-
 const SCREENER_DEFAULT_MESSAGE =
   "Suggest a handful of liquid US equity options that could fit a balanced bullish-bias book over the next few weeks.";
 
@@ -159,7 +156,6 @@ export function ScreenerClient() {
     useState<ScreenerFilter>("all");
   const [picksRows, setPicksRows] = useState<ScreenerRow[]>(DEFAULT_ROWS);
   const [statCards, setStatCards] = useState<StatCard[]>(DEFAULT_STATS);
-  const [aiPicksBlurb, setAiPicksBlurb] = useState(DEFAULT_AI_BLURB);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
 
@@ -215,7 +211,6 @@ export function ScreenerClient() {
       }
       setPicksRows(picks);
       setStatCards(statsFromPicks(picks));
-      setAiPicksBlurb(summary);
     } catch (e) {
       setScanError(
         e instanceof Error ? e.message : "Could not complete the scan.",
@@ -344,7 +339,8 @@ export function ScreenerClient() {
             <div className="border-b border-zinc-800/80 px-5 py-4">
               <h2 className="text-sm font-semibold text-white">AI Picks</h2>
               <p className="mt-0.5 text-xs leading-relaxed text-zinc-500">
-                {aiPicksBlurb}
+                AI-generated picks based on your criteria — real-time data
+                coming soon.
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
                 {screenerFilters.map((f) => (
