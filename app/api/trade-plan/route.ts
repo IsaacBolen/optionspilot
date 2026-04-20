@@ -39,7 +39,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No contract provided" }, { status: 400 });
   }
 
-  const prompt = `The trader asked: "${userPrompt ?? "find me a good options trade"}"
+  const prompt = `Today's date is ${new Date().toLocaleDateString('en-US', {
+  weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
+})}. Use this to accurately calculate days to expiration and whether contracts are short-dated, medium-term, or long-dated.\n\nThe trader asked: "${userPrompt ?? "find me a good options trade"}"
 Their budget: ${userBudget ? "$" + userBudget : "not specified"}
 
 They are considering this specific contract:
