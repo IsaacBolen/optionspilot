@@ -1,17 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  POLYGON_CALL_GAP_MS,
-  polygonFetch,
-  sleep,
-} from "@/lib/polygon-fetch";
+import { polygonFetch } from "@/lib/polygon-fetch";
 
-type PolygonPrevBar = {
-  T?: number;
-  o?: number;
-  h?: number;
-  l?: number;
-  c?: number;
-  v?: number;
+type PolygonSnapshot = {
+  ticker?: string;
+  day?: {
+    c?: number;
+  };
+  todaysChangePerc?: number;
 };
 
 type MarketQuote = {
@@ -40,57 +35,66 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ quotes: [] as MarketQuote[] });
   }
 
+  const url = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${encodeURIComponent(tickers.join(","))}&apiKey=${encodeURIComponent(key)}`;
   const quotes: MarketQuote[] = [];
-  for (let i = 0; i < tickers.length; i++) {
-    if (i > 0) await sleep(POLYGON_CALL_GAP_MS);
-    const ticker = tickers[i];
-    const url = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(ticker)}/prev?adjusted=true&apiKey=${encodeURIComponent(key)}`;
-    try {
-      const res = await polygonFetch(url, 120);
-      const json: unknown = await res.json();
-      if (!res.ok) {
-        const msg =
-          typeof json === "object" &&
-          json !== null &&
-          "message" in json &&
-          typeof (json as { message: unknown }).message === "string"
-            ? (json as { message: string }).message
-            : `HTTP ${res.status}`;
-        quotes.push({ ticker, price: null, changePercent: null, error: msg });
-        continue;
-      }
-      const results =
+  try {
+    const res = await polygonFetch(url, 120);
+    const json: unknown = await res.json();
+    if (!res.ok) {
+      const msg =
         typeof json === "object" &&
         json !== null &&
-        "results" in json &&
-        Array.isArray((json as { results: unknown }).results)
-          ? ((json as { results: PolygonPrevBar[] }).results)
-          : [];
-      const bar = results[0];
-      if (!bar || typeof bar.c !== "number") {
-        quotes.push({
+        "message" in json &&
+        typeof (json as { message: unknown }).message === "string"
+          ? (json as { message: string }).message
+          : `HTTP ${res.status}`;
+      return NextResponse.json(
+        {
+          quotes: tickers.map((ticker) => ({
+            ticker,
+            price: null,
+            changePercent: null,
+            error: msg,
+          })),
+        },
+        { status: 502 },
+      );
+    }
+    const results =
+      typeof json === "object" &&
+      json !== null &&
+      "results" in json &&
+      Array.isArray((json as { results: unknown }).results)
+        ? ((json as { results: PolygonSnapshot[] }).results)
+        : [];
+    const byTicker = new Map(
+      results
+        .filter((r) => typeof r.ticker === "string")
+        .map((r) => [r.ticker as string, r] as const),
+    );
+    for (const ticker of tickers) {
+      const snap = byTicker.get(ticker);
+      const price = snap?.day && typeof snap.day.c === "number" ? snap.day.c : null;
+      const changePercent =
+        typeof snap?.todaysChangePerc === "number" ? snap.todaysChangePerc : null;
+      quotes.push(
+        price === null && changePercent === null
+          ? { ticker, price: null, changePercent: null, error: "No snapshot data" }
+          : { ticker, price, changePercent },
+      );
+    }
+  } catch {
+    return NextResponse.json(
+      {
+        quotes: tickers.map((ticker) => ({
           ticker,
           price: null,
           changePercent: null,
-          error: "No aggregate data",
-        });
-        continue;
-      }
-      const o = typeof bar.o === "number" ? bar.o : bar.c;
-      const c = bar.c;
-      const changePercent =
-        o !== 0 && Number.isFinite(o) && Number.isFinite(c)
-          ? ((c - o) / o) * 100
-          : null;
-      quotes.push({ ticker, price: c, changePercent });
-    } catch {
-      quotes.push({
-        ticker,
-        price: null,
-        changePercent: null,
-        error: "Request failed",
-      });
-    }
+          error: "Request failed",
+        })),
+      },
+      { status: 502 },
+    );
   }
 
   return NextResponse.json({ quotes });
