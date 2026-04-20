@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { Fragment, useCallback, useMemo, useState } from "react";
 
 import { AppChrome } from "../components/app-chrome";
 
@@ -18,6 +18,18 @@ type ScreenerRow = {
   premiumRange: string;
   change24h: number | null;
   change1w: number | null;
+};
+
+type TradePlan = {
+  thesis: string;
+  entryTiming: string;
+  holdPlan: string;
+  targetExit: string;
+  stopLoss: string;
+  whatKillsThisTrade: string;
+  confidenceLevel: "Low" | "Medium" | "High";
+  confidenceReason: string;
+  warningFlags: string;
 };
 
 type StatCard = {
@@ -241,6 +253,11 @@ export function ScreenerClient() {
   const [statCards, setStatCards] = useState<StatCard[]>(DEFAULT_STATS);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [selectedRow, setSelectedRow] = useState<string | null>(null);
+  const [tradePlan, setTradePlan] = useState<TradePlan | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const [lastPrompt, setLastPrompt] = useState("");
 
   const filteredScreenerRows = useMemo(() => {
     const HIGH_IV_MIN = 75;
@@ -303,12 +320,45 @@ export function ScreenerClient() {
     }
   }, []);
 
+  const handleRowClick = async (row: ScreenerRow) => {
+    const key = `${row.ticker}-${row.strike}-${row.type}-${row.expiration}`;
+    if (selectedRow === key) {
+      setSelectedRow(null);
+      setTradePlan(null);
+      return;
+    }
+    setSelectedRow(key);
+    setTradePlan(null);
+    setPlanError(null);
+    setPlanLoading(true);
+    try {
+      const res = await fetch("/api/trade-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contract: row,
+          userPrompt: lastPrompt,
+          userBudget: null,
+        }),
+      });
+      const data = await res.json() as { plan?: TradePlan; error?: string };
+      if (!res.ok || !data.plan) throw new Error(data.error ?? "Failed to load plan");
+      setTradePlan(data.plan);
+    } catch (e) {
+      setPlanError(e instanceof Error ? e.message : "Could not load trade plan");
+    } finally {
+      setPlanLoading(false);
+    }
+  };
+
   const handleFindTrades = () => {
+    setLastPrompt(prompt.trim() || SCREENER_DEFAULT_MESSAGE);
     void runSearch(prompt.trim() || SCREENER_DEFAULT_MESSAGE);
   };
 
   const handleExampleChip = (text: string) => {
     setPrompt(text);
+    setLastPrompt(text);
     void runSearch(text);
   };
 
@@ -460,69 +510,133 @@ export function ScreenerClient() {
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {filteredScreenerRows.map((row, i) => (
-                    <tr
-                      key={`${row.ticker}-${row.strike}-${row.type}-${i}`}
-                      className="text-zinc-300 transition hover:bg-white/[0.02]"
-                    >
-                      <td className="px-5 py-4 font-medium text-white">
-                        {row.ticker}
-                      </td>
-                      <td className="px-5 py-4">
-                        <span
-                          className={
-                            row.type === "Call"
-                              ? "rounded-md bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-300"
-                              : "rounded-md bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-300"
-                          }
-                        >
-                          {row.type}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4 text-right tabular-nums text-zinc-200">
-                        ${row.strike}
-                      </td>
-                      <td className="px-5 py-4 tabular-nums text-zinc-400">
-                        {row.expiration}
-                      </td>
-                      <td className="px-5 py-4 text-right tabular-nums">
-                        {row.ivRank}%
-                      </td>
-                      <td className="px-5 py-4 text-right tabular-nums">
-                        {row.volume.toLocaleString("en-US")}
-                      </td>
-                      <td className="px-5 py-4 text-right align-top tabular-nums">
-                        {row.estPremium != null &&
-                        Number.isFinite(row.estPremium) ? (
-                          <div className="flex flex-col items-end gap-0.5">
-                            <span className="text-sm text-zinc-200">
-                              ${row.estPremium.toFixed(2)}/share
-                            </span>
-                            <span className="text-[11px] leading-tight text-zinc-400">
-                              ~
-                              {Math.round(row.estPremium * 100).toLocaleString(
-                                "en-US",
-                                {
-                                  style: "currency",
-                                  currency: "USD",
-                                  maximumFractionDigits: 0,
-                                },
-                              )}{" "}
-                              per contract
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-sm text-zinc-500">—</span>
-                        )}
-                      </td>
-                      <td
-                        className={`px-5 py-4 text-right tabular-nums font-medium ${change1wClass(row.change1w)}`}
+                    <Fragment key={`${row.ticker}-${row.strike}-${row.type}-${i}`}>
+                      <tr
+                        onClick={() => void handleRowClick(row)}
+                        className={`text-zinc-300 transition cursor-pointer ${
+                          selectedRow === `${row.ticker}-${row.strike}-${row.type}-${row.expiration}`
+                            ? "bg-emerald-500/10 border-l-2 border-l-emerald-400"
+                            : "hover:bg-white/[0.02]"
+                        }`}
                       >
-                        {formatChange1w(row.change1w)}
-                      </td>
-                      <td className="px-5 py-4 text-right tabular-nums font-medium text-emerald-400">
-                        {row.signalScore}
-                      </td>
-                    </tr>
+                        <td className="px-5 py-4 font-medium text-white">
+                          {row.ticker}
+                        </td>
+                        <td className="px-5 py-4">
+                          <span
+                            className={
+                              row.type === "Call"
+                                ? "rounded-md bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-300"
+                                : "rounded-md bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-300"
+                            }
+                          >
+                            {row.type}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4 text-right tabular-nums text-zinc-200">
+                          ${row.strike}
+                        </td>
+                        <td className="px-5 py-4 tabular-nums text-zinc-400">
+                          {row.expiration}
+                        </td>
+                        <td className="px-5 py-4 text-right tabular-nums">
+                          {row.ivRank}%
+                        </td>
+                        <td className="px-5 py-4 text-right tabular-nums">
+                          {row.volume.toLocaleString("en-US")}
+                        </td>
+                        <td className="px-5 py-4 text-right align-top tabular-nums">
+                          {row.estPremium != null &&
+                          Number.isFinite(row.estPremium) ? (
+                            <div className="flex flex-col items-end gap-0.5">
+                              <span className="text-sm text-zinc-200">
+                                ${row.estPremium.toFixed(2)}/share
+                              </span>
+                              <span className="text-[11px] leading-tight text-zinc-400">
+                                ~
+                                {Math.round(row.estPremium * 100).toLocaleString(
+                                  "en-US",
+                                  {
+                                    style: "currency",
+                                    currency: "USD",
+                                    maximumFractionDigits: 0,
+                                  },
+                                )}{" "}
+                                per contract
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-sm text-zinc-500">—</span>
+                          )}
+                        </td>
+                        <td
+                          className={`px-5 py-4 text-right tabular-nums font-medium ${change1wClass(row.change1w)}`}
+                        >
+                          {formatChange1w(row.change1w)}
+                        </td>
+                        <td className="px-5 py-4 text-right tabular-nums font-medium text-emerald-400">
+                          {row.signalScore}
+                        </td>
+                      </tr>
+                      {selectedRow === `${row.ticker}-${row.strike}-${row.type}-${row.expiration}` && (
+                        <tr key={`plan-${row.ticker}-${row.strike}-${i}`}>
+                          <td colSpan={9} className="px-5 py-5 bg-zinc-900/80 border-b border-zinc-800/80">
+                            {planLoading && (
+                              <div className="flex items-center gap-3 text-sm text-emerald-300">
+                                <div className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-500/30 border-t-emerald-400" />
+                                Building your trade plan...
+                              </div>
+                            )}
+                            {planError && (
+                              <p className="text-sm text-red-400">{planError}</p>
+                            )}
+                            {tradePlan && !planLoading && (
+                              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                                <div className="lg:col-span-3 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+                                  <p className="text-xs font-semibold uppercase tracking-wider text-emerald-400 mb-1">Trade Thesis</p>
+                                  <p className="text-sm text-zinc-200 leading-relaxed">{tradePlan.thesis}</p>
+                                </div>
+                                <div className="rounded-xl border border-zinc-700/60 bg-zinc-950/60 p-4">
+                                  <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">Entry Timing</p>
+                                  <p className="text-sm text-zinc-300 leading-relaxed">{tradePlan.entryTiming}</p>
+                                </div>
+                                <div className="rounded-xl border border-zinc-700/60 bg-zinc-950/60 p-4">
+                                  <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">Hold Plan</p>
+                                  <p className="text-sm text-zinc-300 leading-relaxed">{tradePlan.holdPlan}</p>
+                                </div>
+                                <div className="rounded-xl border border-zinc-700/60 bg-zinc-950/60 p-4">
+                                  <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">Target Exit</p>
+                                  <p className="text-sm text-emerald-300 leading-relaxed font-medium">{tradePlan.targetExit}</p>
+                                </div>
+                                <div className="rounded-xl border border-zinc-700/60 bg-zinc-950/60 p-4">
+                                  <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">Stop Loss</p>
+                                  <p className="text-sm text-red-300 leading-relaxed font-medium">{tradePlan.stopLoss}</p>
+                                </div>
+                                <div className="rounded-xl border border-zinc-700/60 bg-zinc-950/60 p-4">
+                                  <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">What Kills This Trade</p>
+                                  <p className="text-sm text-zinc-300 leading-relaxed">{tradePlan.whatKillsThisTrade}</p>
+                                </div>
+                                <div className="rounded-xl border border-zinc-700/60 bg-zinc-950/60 p-4">
+                                  <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Confidence</p>
+                                  <span className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${
+                                    tradePlan.confidenceLevel === "High" ? "bg-emerald-500/20 text-emerald-300" :
+                                    tradePlan.confidenceLevel === "Medium" ? "bg-amber-500/20 text-amber-300" :
+                                    "bg-red-500/20 text-red-300"
+                                  }`}>{tradePlan.confidenceLevel}</span>
+                                  <p className="mt-2 text-xs text-zinc-400">{tradePlan.confidenceReason}</p>
+                                </div>
+                                {tradePlan.warningFlags && tradePlan.warningFlags !== "None" && (
+                                  <div className="lg:col-span-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
+                                    <p className="text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">⚠ Warning Flags</p>
+                                    <p className="text-sm text-zinc-300 leading-relaxed">{tradePlan.warningFlags}</p>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
