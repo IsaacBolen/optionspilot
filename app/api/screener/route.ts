@@ -41,6 +41,8 @@ Rules:
 - Pick 5-7 contracts. Rank best first by profit potential vs risk.
 - signalScore: integer 0-100
 - ivRank: integer 0-100 (you may infer from implied_volatility × 100, capped 0-100)
+- NEVER recommend deep out-of-the-money contracts. Only pick contracts where the strike is within 15% of the current underlying price (near the money or slightly OTM). Deep OTM contracts rarely reach profit targets in short timeframes.
+- Penalize contracts with IV Rank below 20% — low IV means less premium movement potential.
 No markdown, no commentary outside the JSON.`;
 
 type ScreenerPick = {
