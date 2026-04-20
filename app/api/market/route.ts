@@ -6,6 +6,9 @@ type PolygonSnapshot = {
   day?: {
     c?: number;
   };
+  lastTrade?: {
+    p?: number;
+  };
   todaysChangePerc?: number;
 };
 
@@ -40,6 +43,7 @@ export async function GET(request: NextRequest) {
   try {
     const res = await polygonFetch(url, 120);
     const json: unknown = await res.json();
+    console.log("Polygon market snapshot raw response:", JSON.stringify(json));
     if (!res.ok) {
       const msg =
         typeof json === "object" &&
@@ -60,21 +64,27 @@ export async function GET(request: NextRequest) {
         { status: 502 },
       );
     }
-    const results =
+    const snapshotTickers =
       typeof json === "object" &&
       json !== null &&
-      "results" in json &&
-      Array.isArray((json as { results: unknown }).results)
-        ? ((json as { results: PolygonSnapshot[] }).results)
+      "tickers" in json &&
+      Array.isArray((json as { tickers: unknown }).tickers)
+        ? ((json as { tickers: PolygonSnapshot[] }).tickers)
         : [];
     const byTicker = new Map(
-      results
+      snapshotTickers
         .filter((r) => typeof r.ticker === "string")
         .map((r) => [r.ticker as string, r] as const),
     );
     for (const ticker of tickers) {
       const snap = byTicker.get(ticker);
-      const price = snap?.day && typeof snap.day.c === "number" ? snap.day.c : null;
+      const fromLastTrade =
+        snap?.lastTrade && typeof snap.lastTrade.p === "number"
+          ? snap.lastTrade.p
+          : null;
+      const fromDay =
+        snap?.day && typeof snap.day.c === "number" ? snap.day.c : null;
+      const price = fromLastTrade ?? fromDay;
       const changePercent =
         typeof snap?.todaysChangePerc === "number" ? snap.todaysChangePerc : null;
       quotes.push(
