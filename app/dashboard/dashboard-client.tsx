@@ -305,6 +305,8 @@ export function DashboardClient() {
   const [chartBars, setChartBars] = useState<{ t: number; c: number }[]>([]);
   const [chartLoading, setChartLoading] = useState(false);
   const [chartError, setChartError] = useState<string | null>(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const loadDefaultMarket = useCallback(async () => {
     setMarketFocusTicker(null);
@@ -464,12 +466,40 @@ export function DashboardClient() {
   }, []);
 
   useEffect(() => {
-    void loadNewsFeed(DEFAULT_NEWS_TICKERS);
-  }, [loadNewsFeed]);
+    let cancelled = false;
+    const refreshAllMarketData = async () => {
+      await Promise.allSettled([
+        loadNewsFeed(feedTickersCsv),
+        marketFocusTicker
+          ? loadFocusedMarket(marketFocusTicker)
+          : loadDefaultMarket(),
+      ]);
+      if (!cancelled) {
+        setLastUpdatedAt(Date.now());
+      }
+    };
+    void refreshAllMarketData();
+    const intervalId = window.setInterval(() => {
+      void refreshAllMarketData();
+    }, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [
+    feedTickersCsv,
+    marketFocusTicker,
+    loadNewsFeed,
+    loadFocusedMarket,
+    loadDefaultMarket,
+  ]);
 
   useEffect(() => {
-    void loadDefaultMarket();
-  }, [loadDefaultMarket]);
+    const intervalId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1_000);
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   const fetchBriefing = useCallback(async (userMessage: string) => {
     setIsBriefingLoading(true);
@@ -554,6 +584,8 @@ export function DashboardClient() {
 
   const focusedQuote =
     marketFocusTicker != null ? marketQuotes[0] : undefined;
+  const lastUpdatedSecondsAgo =
+    lastUpdatedAt == null ? null : Math.max(0, Math.floor((nowMs - lastUpdatedAt) / 1000));
 
   return (
     <AppChrome>
@@ -685,6 +717,11 @@ export function DashboardClient() {
                 ? `${marketFocusTicker} · Polygon prev session & hourly chart`
                 : `${DEFAULT_MARKET_TICKERS.replace(/,/g, " · ")} · Polygon prev session`}
             </p>
+            {lastUpdatedSecondsAgo != null && (
+              <p className="mt-0.5 text-xs text-zinc-500">
+                Last updated: {lastUpdatedSecondsAgo} seconds ago
+              </p>
+            )}
           </div>
           <div className="px-5 py-5">
             {marketLoading ? (
