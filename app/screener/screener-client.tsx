@@ -269,13 +269,10 @@ export function ScreenerClient() {
     setIsAnalyzing(true);
     setScanError(null);
     try {
-      const res = await fetch("/api/chat", {
+      const res = await fetch("/api/screener", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message,
-          context: "screener",
-        }),
+        body: JSON.stringify({ message }),
       });
       const data = (await res.json()) as {
         summary?: string;
@@ -289,11 +286,9 @@ export function ScreenerClient() {
       const picks = rawPicks
         .map(normalizePickFromApi)
         .filter((p): p is ScreenerRow => p !== null);
-      const summary =
-        typeof data.summary === "string" ? data.summary.trim() : "";
-      if (!summary || picks.length < 3) {
+      if (picks.length === 0) {
         throw new Error(
-          data.error ?? "Assistant returned too few picks. Try again.",
+          data.error ?? "Assistant returned no picks. Try again.",
         );
       }
       const sorted = [...picks].sort((a, b) => b.signalScore - a.signalScore);
