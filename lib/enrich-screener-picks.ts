@@ -19,14 +19,17 @@ async function fetchDailyCloses(
   const url = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(ticker)}/range/1/day/${fromDate}/${toDate}?adjusted=true&sort=asc&limit=30&apiKey=${encodeURIComponent(key)}`;
   const res = await polygonFetch(url, 120);
   const json: unknown = await res.json();
+  console.log(`Polygon response for ${ticker}:`, JSON.stringify(json).slice(0, 500));
   if (!res.ok || typeof json !== "object" || json === null) return [];
   const results =
     "results" in json && Array.isArray((json as { results: unknown }).results)
       ? ((json as { results: PolygonDayBar[] }).results)
       : [];
-  return results
+  const closes = results
     .map((b) => (typeof b.c === "number" ? b.c : NaN))
     .filter((c) => Number.isFinite(c) && c > 0);
+  console.log(`Closes for ${ticker}:`, closes);
+  return closes;
 }
 
 function roundPct(n: number): number {
