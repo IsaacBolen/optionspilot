@@ -32,6 +32,11 @@ type TradePlan = {
   warningFlags: string;
 };
 
+type LogModalState = {
+  row: ScreenerRow;
+  tradePlan: TradePlan | null;
+} | null;
+
 type StatCard = {
   label: string;
   value: string;
@@ -245,6 +250,109 @@ function statsFromPicks(picks: ScreenerRow[]): StatCard[] {
   ];
 }
 
+function LogTradeModal({
+  state,
+  onClose,
+  onConfirm
+}: {
+  state: LogModalState;
+  onClose: () => void;
+  onConfirm: (qty: number, entryPrice: number, platform: string) => Promise<void>;
+}) {
+  const [qty, setQty] = useState(1);
+  const [entryPrice, setEntryPrice] = useState(state?.row.estPremium ?? 0);
+  const [platform, setPlatform] = useState('Robinhood');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  if (!state) return null;
+  const { row } = state;
+  const totalCost = qty * (entryPrice ?? 0) * 100;
+
+  const handleConfirm = async () => {
+    setSaving(true);
+    await onConfirm(qty, entryPrice, platform);
+    setSaving(false);
+    setSaved(true);
+    setTimeout(() => {
+      setSaved(false);
+      onClose();
+    }, 1200);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+      <div className="w-full max-w-md rounded-2xl border border-zinc-700/80 bg-zinc-900 p-6 shadow-2xl">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-base font-semibold text-white">Log Trade</h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 text-xl leading-none">×</button>
+        </div>
+
+        <div className="mb-5 rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
+          <div className="flex items-center gap-3">
+            <span className="text-lg font-bold text-white">{row.ticker}</span>
+            <span className={row.type === 'Call'
+              ? 'rounded-md bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-300'
+              : 'rounded-md bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-300'
+            }>{row.type}</span>
+            <span className="text-sm text-zinc-400">${row.strike} · {row.expiration}</span>
+          </div>
+          <p className="mt-2 text-xs text-zinc-500">Signal Score: {row.signalScore}/100</p>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Number of Contracts</label>
+            <input
+              type="number"
+              min={1}
+              value={qty}
+              onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))}
+              className="mt-1.5 w-full rounded-xl border border-zinc-700/80 bg-zinc-950/80 px-4 py-2.5 text-sm text-white focus:border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Your Entry Price (per share)</label>
+            <input
+              type="number"
+              step={0.01}
+              min={0}
+              value={entryPrice}
+              onChange={e => setEntryPrice(parseFloat(e.target.value) || 0)}
+              className="mt-1.5 w-full rounded-xl border border-zinc-700/80 bg-zinc-950/80 px-4 py-2.5 text-sm text-white focus:border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
+            />
+            <p className="mt-1 text-xs text-zinc-500">Total cost: ${totalCost.toFixed(0)}</p>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Platform</label>
+            <select
+              value={platform}
+              onChange={e => setPlatform(e.target.value)}
+              className="mt-1.5 w-full rounded-xl border border-zinc-700/80 bg-zinc-950/80 px-4 py-2.5 text-sm text-white focus:border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
+            >
+              <option>Robinhood</option>
+              <option>Webull</option>
+              <option>TD Ameritrade</option>
+              <option>Tastytrade</option>
+              <option>E*TRADE</option>
+              <option>Schwab</option>
+              <option>Other</option>
+            </select>
+          </div>
+        </div>
+
+        <button
+          onClick={handleConfirm}
+          disabled={saving || saved}
+          className="mt-6 w-full rounded-xl bg-emerald-500 py-3 text-sm font-semibold text-zinc-950 shadow-[0_0_24px_rgba(16,185,129,0.35)] transition hover:bg-emerald-400 disabled:opacity-60"
+        >
+          {saved ? '✓ Logged to Positions!' : saving ? 'Saving...' : 'Confirm & Log Trade'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function ScreenerClient() {
   const [prompt, setPrompt] = useState("");
   const [screenerFilter, setScreenerFilter] =
@@ -258,6 +366,7 @@ export function ScreenerClient() {
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
   const [lastPrompt, setLastPrompt] = useState("");
+  const [logModal, setLogModal] = useState<LogModalState>(null);
 
   const filteredScreenerRows = useMemo(() => {
     const HIGH_IV_MIN = 75;
@@ -360,6 +469,26 @@ export function ScreenerClient() {
     setPrompt(text);
     setLastPrompt(text);
     void runSearch(text);
+  };
+
+  const handleLogTrade = async (qty: number, entryPrice: number, platform: string) => {
+    if (!logModal) return;
+    const { row, tradePlan } = logModal;
+    await fetch('/api/positions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ticker: row.ticker,
+        type: row.type,
+        strike: row.strike,
+        expiration: row.expiration,
+        quantity: qty,
+        entry_price: entryPrice,
+        platform,
+        ai_thesis: tradePlan?.thesis ?? null,
+        signal_score: row.signalScore,
+      }),
+    });
   };
 
   return (
@@ -506,6 +635,7 @@ export function ScreenerClient() {
                     <th className="px-5 py-3.5 text-right">Est. Premium</th>
                     <th className="px-5 py-3.5 text-right">1W Change</th>
                     <th className="px-5 py-3.5 text-right">Signal Score</th>
+                    <th className="px-5 py-3.5 text-right">Log</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
@@ -577,10 +707,22 @@ export function ScreenerClient() {
                         <td className="px-5 py-4 text-right tabular-nums font-medium text-emerald-400">
                           {row.signalScore}
                         </td>
+                        <td className="px-5 py-4 text-right">
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              setLogModal({ row, tradePlan: selectedRow === `${row.ticker}-${row.strike}-${row.type}-${row.expiration}` ? tradePlan : null });
+                            }}
+                            className="inline-flex items-center justify-center h-7 w-7 rounded-full border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/25 transition text-base font-bold"
+                            title="Log this trade to Positions"
+                          >
+                            +
+                          </button>
+                        </td>
                       </tr>
                       {selectedRow === `${row.ticker}-${row.strike}-${row.type}-${row.expiration}` && (
                         <tr key={`plan-${row.ticker}-${row.strike}-${i}`}>
-                          <td colSpan={9} className="px-5 py-5 bg-zinc-900/80 border-b border-zinc-800/80">
+                          <td colSpan={10} className="px-5 py-5 bg-zinc-900/80 border-b border-zinc-800/80">
                             {planLoading && (
                               <div className="flex items-center gap-3 text-sm text-emerald-300">
                                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-500/30 border-t-emerald-400" />
@@ -644,6 +786,11 @@ export function ScreenerClient() {
           </section>
         </div>
       </main>
+      <LogTradeModal
+        state={logModal}
+        onClose={() => setLogModal(null)}
+        onConfirm={handleLogTrade}
+      />
     </AppChrome>
   );
 }
