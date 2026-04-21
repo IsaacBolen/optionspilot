@@ -222,7 +222,16 @@ type PositionReport = {
   recommendation: "Hold" | "Consider Selling" | "Sell Now" | "Already Expired";
   urgency: "Low" | "Medium" | "High";
   summary: string;
-  updatedExitTarget: string;
+  exitTarget: {
+    previousTarget: string;
+    currentTarget: string;
+    changed: boolean;
+    reason: string;
+  };
+  checkInDates: {
+    date: string;
+    reason: string;
+  }[];
   redFlags: string;
 };
 
@@ -492,12 +501,35 @@ export function PositionsClient() {
                       <p className="text-sm text-zinc-300 leading-relaxed mb-3">
                         {item.summary}
                       </p>
-                      <div className="space-y-2">
+                      <div className="space-y-3">
                         <div>
-                          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-0.5">
-                            Updated Exit Target
+                          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">
+                            Exit Target
                           </p>
-                          <p className="text-xs text-emerald-300">{item.updatedExitTarget}</p>
+                          {item.exitTarget.changed ? (
+                            <div className="space-y-0.5">
+                              <p className="text-xs text-zinc-500 line-through">{item.exitTarget.previousTarget}</p>
+                              <p className="text-xs font-semibold text-emerald-300">{item.exitTarget.currentTarget}</p>
+                              <p className="text-xs text-zinc-500 mt-1 italic">{item.exitTarget.reason}</p>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-emerald-300">{item.exitTarget.currentTarget}</p>
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">
+                            Check-in Dates
+                          </p>
+                          <div className="space-y-1.5">
+                            {item.checkInDates.map((d, j) => (
+                              <div key={j} className="flex gap-2">
+                                <span className={`text-xs font-semibold shrink-0 ${d.reason.includes("MUST EXIT") ? "text-red-400" : "text-zinc-400"}`}>
+                                  {d.date}
+                                </span>
+                                <span className="text-xs text-zinc-500 leading-relaxed">{d.reason}</span>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                         {item.redFlags !== "None" && (
                           <div>
