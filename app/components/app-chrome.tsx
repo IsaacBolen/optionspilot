@@ -30,6 +30,7 @@ function AppHeader() {
   const dashboardActive = pathname === "/dashboard";
   const screenerActive = pathname === "/screener";
   const positionsActive = pathname === "/positions";
+  const promptsActive = pathname === "/prompts";
 
   return (
     <header className="relative z-10 border-b border-zinc-800/80 bg-zinc-950/80 backdrop-blur-md">
@@ -71,6 +72,16 @@ function AppHeader() {
               }`}
             >
               Positions
+            </Link>
+            <Link
+              href="/prompts"
+              className={`rounded-lg px-2.5 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 ${
+                promptsActive
+                  ? "bg-emerald-500/10 text-emerald-200 ring-1 ring-emerald-500/25"
+                  : "text-zinc-400 hover:bg-white/[0.04] hover:text-emerald-200/90"
+              }`}
+            >
+              Prompts
             </Link>
           </div>
         </div>

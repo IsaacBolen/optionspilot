@@ -1,0 +1,5 @@
+import { PromptsClient } from "./prompts-client";
+
+export default function PromptsPage() {
+  return <PromptsClient />;
+}

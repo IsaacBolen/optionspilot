@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { AppChrome } from "../components/app-chrome";
 
 type Prompt = {
   title: string;
@@ -99,7 +100,7 @@ const CATEGORIES: Category[] = [
     prompts: [
       {
         title: "Broad market ETFs",
-        why: "SPY, QQQ, IWM — tightest spreads and most liquid options market. Best for clean entries and exits.",
+        why: "QQQ, IWM, DIA — tightest spreads and most liquid options market. Best for clean entries and exits.",
         prompt:
           "I have $400 to spend. Show me the best calls on QQQ, IWM, or DIA expiring in 2–3 weeks. I want contracts where the premium has a realistic chance of going up 40–60% so I can sell for profit. Prioritize liquidity and signal score. If my budget is too small for quality contracts on these tickers, tell me which tickers are more realistic and show me those instead.",
       },
@@ -119,80 +120,98 @@ const CATEGORIES: Category[] = [
   },
 ];
 
-export function PromptLibraryModal({
-  onClose,
-  onSelect,
-}: {
-  onClose: () => void;
-  onSelect: (prompt: string) => void;
-}) {
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className={`shrink-0 rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+        copied
+          ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
+          : "border-zinc-700/60 bg-zinc-950/60 text-zinc-400 hover:border-emerald-500/40 hover:text-emerald-300"
+      }`}
+    >
+      {copied ? "Copied!" : "Copy"}
+    </button>
+  );
+}
+
+export function PromptsClient() {
   const [activeTab, setActiveTab] = useState("budget");
 
   const activeCategory = CATEGORIES.find((c) => c.id === activeTab)!;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
-      <div className="w-full max-w-2xl rounded-2xl border border-zinc-700/80 bg-zinc-900 shadow-2xl flex flex-col max-h-[85vh]">
-        {/* Header */}
-        <div className="flex items-start justify-between px-6 pt-6 pb-4 border-b border-zinc-800/80 shrink-0">
-          <div>
-            <h3 className="text-base font-semibold text-white">Prompt library</h3>
-            <p className="mt-1 text-xs text-zinc-500">Click any prompt to load it into the screener — review before running</p>
+    <AppChrome>
+      <main className="relative z-10 mx-auto max-w-4xl px-6 py-8 sm:py-10">
+
+        {/* Page header */}
+        <div className="mb-8">
+          <p className="text-xs font-medium uppercase tracking-widest text-emerald-400/90">
+            Prompt library
+          </p>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
+            Find the right prompt for your trade
+          </h1>
+          <p className="mt-2 max-w-2xl text-sm text-zinc-400">
+            Each prompt is structured to give the AI exactly what it needs — budget, tickers, timeframe, and exit goal. Copy one, paste it into the screener, and adjust any details before running.
+          </p>
+        </div>
+
+        {/* Card */}
+        <div className="overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm ring-1 ring-inset ring-white/5 backdrop-blur-sm">
+
+          {/* Tabs */}
+          <div className="flex border-b border-zinc-800/80 px-2">
+            {CATEGORIES.map((cat) => (
+              <button
+                key={cat.id}
+                onClick={() => setActiveTab(cat.id)}
+                className={`px-4 py-4 text-sm font-medium border-b-2 transition whitespace-nowrap ${
+                  activeTab === cat.id
+                    ? "border-emerald-400 text-emerald-300"
+                    : "border-transparent text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                {cat.label}
+              </button>
+            ))}
           </div>
-          <button
-            onClick={onClose}
-            className="text-zinc-500 hover:text-zinc-300 text-xl leading-none mt-0.5"
-          >
-            ×
-          </button>
+
+          {/* Prompt list */}
+          <div className="divide-y divide-zinc-800/60">
+            {activeCategory.prompts.map((p) => (
+              <div key={p.title} className="p-6">
+                <div className="flex items-start justify-between gap-4 mb-2">
+                  <h2 className="text-sm font-semibold text-white">{p.title}</h2>
+                  <CopyButton text={p.prompt} />
+                </div>
+                <p className="text-xs text-zinc-500 leading-relaxed mb-4">
+                  {p.why}
+                </p>
+                <div className="rounded-xl border border-zinc-700/40 bg-zinc-950/60 px-4 py-3 border-l-2 border-l-emerald-500/40">
+                  <p className="text-sm text-zinc-300 leading-relaxed italic">
+                    {p.prompt}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
-        {/* Tabs */}
-        <div className="flex border-b border-zinc-800/80 px-6 shrink-0">
-          {CATEGORIES.map((cat) => (
-            <button
-              key={cat.id}
-              onClick={() => setActiveTab(cat.id)}
-              className={`px-4 py-3 text-xs font-medium border-b-2 transition whitespace-nowrap ${
-                activeTab === cat.id
-                  ? "border-emerald-400 text-emerald-300"
-                  : "border-transparent text-zinc-500 hover:text-zinc-300"
-              }`}
-            >
-              {cat.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Prompt cards */}
-        <div className="overflow-y-auto px-6 py-5 flex flex-col gap-3">
-          {activeCategory.prompts.map((p) => (
-            <button
-              key={p.title}
-              onClick={() => {
-                onSelect(p.prompt);
-                onClose();
-              }}
-              className="text-left rounded-xl border border-zinc-700/60 bg-zinc-950/60 p-4 hover:border-emerald-500/40 hover:bg-emerald-500/[0.04] transition group"
-            >
-              <p className="text-sm font-semibold text-white mb-1 group-hover:text-emerald-300 transition">
-                {p.title}
-              </p>
-              <p className="text-xs text-zinc-500 leading-relaxed mb-3">
-                {p.why}
-              </p>
-              <p className="text-xs text-zinc-400 leading-relaxed border-l-2 border-emerald-500/40 pl-3 italic">
-                {p.prompt}
-              </p>
-            </button>
-          ))}
-        </div>
-
-        {/* Footer */}
-        <div className="px-6 py-3 border-t border-zinc-800/80 shrink-0">
-          <p className="text-xs text-zinc-600">More advanced prompts coming soon</p>
-        </div>
-      </div>
-    </div>
+        {/* Footer hint */}
+        <p className="mt-6 text-center text-xs text-zinc-600">
+          More advanced prompts coming soon
+        </p>
+      </main>
+    </AppChrome>
   );
 }

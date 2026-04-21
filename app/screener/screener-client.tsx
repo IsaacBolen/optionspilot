@@ -1,9 +1,9 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
 import { AppChrome } from "../components/app-chrome";
-import { PromptLibraryModal } from "./prompt-library-modal";
 
 type ScreenerFilter = "all" | "calls" | "puts" | "highIv" | "unusualVol";
 
@@ -281,7 +281,6 @@ export function ScreenerClient() {
   const [planError, setPlanError] = useState<string | null>(null);
   const [lastPrompt, setLastPrompt] = useState("");
   const [logModal, setLogModal] = useState<LogModalState>(null);
-  const [showLibrary, setShowLibrary] = useState(false);
 
   const filteredScreenerRows = useMemo(() => {
     const HIGH_IV_MIN = 75;
@@ -446,14 +445,12 @@ export function ScreenerClient() {
             </div>
 
             <div className="mt-5">
-              <button
-                type="button"
-                disabled={isAnalyzing}
-                onClick={() => setShowLibrary(true)}
-                className="rounded-full border border-emerald-500/25 bg-emerald-500/[0.08] px-4 py-1.5 text-xs font-medium text-emerald-100/90 transition hover:border-emerald-400/40 hover:bg-emerald-500/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 disabled:opacity-50"
+              <Link
+                href="/prompts"
+                className="rounded-full border border-emerald-500/25 bg-emerald-500/[0.08] px-4 py-1.5 text-xs font-medium text-emerald-100/90 transition hover:border-emerald-400/40 hover:bg-emerald-500/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
               >
                 Browse prompt library →
-              </button>
+              </Link>
             </div>
           </div>
         </section>
@@ -699,12 +696,6 @@ export function ScreenerClient() {
         onClose={() => setLogModal(null)}
         onConfirm={handleLogTrade}
       />
-      {showLibrary && (
-        <PromptLibraryModal
-          onClose={() => setShowLibrary(false)}
-          onSelect={(p: string) => setPrompt(p)}
-        />
-      )}
     </AppChrome>
   );
 }
