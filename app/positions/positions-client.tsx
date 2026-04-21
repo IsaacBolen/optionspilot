@@ -265,7 +265,7 @@ export function PositionsClient() {
               <div>
                 <h2 className="text-sm font-semibold text-white">AI Situation Report</h2>
                 <p className="mt-0.5 text-xs text-zinc-500">
-                  Claude's analysis of each open position based on current conditions
+                  Claude&apos;s analysis of each open position based on current conditions
                 </p>
               </div>
               <button
