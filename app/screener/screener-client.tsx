@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 import { AppChrome } from "../components/app-chrome";
+import { PromptLibraryModal } from "./prompt-library-modal";
 
 type ScreenerFilter = "all" | "calls" | "puts" | "highIv" | "unusualVol";
 
@@ -46,13 +47,6 @@ type StatCard = {
 
 const PLACEHOLDER =
   "e.g. I want a call option expiring in 2-4 weeks, premium under $1.00 per contract, that I can sell when it goes up 50%...";
-
-const EXAMPLE_PROMPTS = [
-  "Calls under $100 expiring this month",
-  "High IV puts for premium selling",
-  "Bullish plays on tech stocks",
-  "Low cost calls with 2-4 week expiry",
-] as const;
 
 const DEFAULT_STATS: StatCard[] = [
   {
@@ -287,6 +281,7 @@ export function ScreenerClient() {
   const [planError, setPlanError] = useState<string | null>(null);
   const [lastPrompt, setLastPrompt] = useState("");
   const [logModal, setLogModal] = useState<LogModalState>(null);
+  const [showLibrary, setShowLibrary] = useState(false);
 
   const filteredScreenerRows = useMemo(() => {
     const HIGH_IV_MIN = 75;
@@ -385,12 +380,6 @@ export function ScreenerClient() {
     void runSearch(prompt.trim() || SCREENER_DEFAULT_MESSAGE);
   };
 
-  const handleExampleChip = (text: string) => {
-    setPrompt(text);
-    setLastPrompt(text);
-    void runSearch(text);
-  };
-
   const handleLogTrade = async (qty: number, entryPrice: number, platform: string) => {
     if (!logModal) return;
     const { row, tradePlan } = logModal;
@@ -456,18 +445,15 @@ export function ScreenerClient() {
               </div>
             </div>
 
-            <div className="mt-5 flex flex-wrap gap-2">
-              {EXAMPLE_PROMPTS.map((chip) => (
-                <button
-                  key={chip}
-                  type="button"
-                  disabled={isAnalyzing}
-                  onClick={() => handleExampleChip(chip)}
-                  className="rounded-full border border-emerald-500/25 bg-emerald-500/[0.08] px-3.5 py-1.5 text-left text-xs font-medium text-emerald-100/90 transition hover:border-emerald-400/40 hover:bg-emerald-500/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 disabled:opacity-50 sm:text-sm"
-                >
-                  {chip}
-                </button>
-              ))}
+            <div className="mt-5">
+              <button
+                type="button"
+                disabled={isAnalyzing}
+                onClick={() => setShowLibrary(true)}
+                className="rounded-full border border-emerald-500/25 bg-emerald-500/[0.08] px-4 py-1.5 text-xs font-medium text-emerald-100/90 transition hover:border-emerald-400/40 hover:bg-emerald-500/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 disabled:opacity-50"
+              >
+                Browse prompt library →
+              </button>
             </div>
           </div>
         </section>
@@ -713,6 +699,12 @@ export function ScreenerClient() {
         onClose={() => setLogModal(null)}
         onConfirm={handleLogTrade}
       />
+      {showLibrary && (
+        <PromptLibraryModal
+          onClose={() => setShowLibrary(false)}
+          onSelect={(p: string) => setPrompt(p)}
+        />
+      )}
     </AppChrome>
   );
 }
