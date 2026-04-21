@@ -633,14 +633,13 @@ export function ScreenerClient() {
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1180px] text-left text-sm">
+              <table className="w-full min-w-0 text-left text-sm">
                 <thead>
                   <tr className="border-b border-zinc-800/80 bg-zinc-950/40 text-xs font-medium uppercase tracking-wider text-zinc-500">
                     <th className="px-5 py-3.5">Ticker</th>
                     <th className="px-5 py-3.5">Type</th>
                     <th className="px-5 py-3.5 text-right">Strike</th>
                     <th className="px-5 py-3.5">Expiration</th>
-                    <th className="px-5 py-3.5 text-right">IV Rank</th>
                     <th className="px-5 py-3.5 text-right">Volume</th>
                     <th className="px-5 py-3.5 text-right">Est. Premium</th>
                     <th className="px-5 py-3.5 text-right">1W Change</th>
@@ -691,9 +690,6 @@ export function ScreenerClient() {
                           {row.expiration}
                         </td>
                         <td className="px-5 py-4 text-right tabular-nums">
-                          {row.ivRank}%
-                        </td>
-                        <td className="px-5 py-4 text-right tabular-nums">
                           {row.volume.toLocaleString("en-US")}
                         </td>
                         <td className="px-5 py-4 text-right align-top tabular-nums">
@@ -731,7 +727,7 @@ export function ScreenerClient() {
                       </tr>
                       {selectedRow === `${row.ticker}-${row.strike}-${row.type}-${row.expiration}` && (
                         <tr key={`plan-${row.ticker}-${row.strike}-${i}`}>
-                          <td colSpan={9} className="px-5 py-5 bg-zinc-900/80 border-b border-zinc-800/80">
+                          <td colSpan={8} className="px-5 py-5 bg-zinc-900/80 border-b border-zinc-800/80">
                             {planLoading && (
                               <div className="flex items-center gap-3 text-sm text-emerald-300">
                                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-500/30 border-t-emerald-400" />
