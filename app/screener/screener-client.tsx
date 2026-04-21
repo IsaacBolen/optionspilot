@@ -645,7 +645,6 @@ export function ScreenerClient() {
                     <th className="px-5 py-3.5 text-right">Est. Premium</th>
                     <th className="px-5 py-3.5 text-right">1W Change</th>
                     <th className="px-5 py-3.5 text-right">Signal Score</th>
-                    <th className="px-5 py-3.5 text-right">Log</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
@@ -660,7 +659,19 @@ export function ScreenerClient() {
                         }`}
                       >
                         <td className="px-5 py-4 font-medium text-white">
-                          {row.ticker}
+                          <div className="flex items-center gap-2">
+                            <span>{row.ticker}</span>
+                            <button
+                              onClick={e => {
+                                e.stopPropagation();
+                                setLogModal({ row, tradePlan: selectedRow === `${row.ticker}-${row.strike}-${row.type}-${row.expiration}` ? tradePlan : null });
+                              }}
+                              className="inline-flex items-center justify-center h-5 w-5 rounded-full border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/25 transition text-xs font-bold"
+                              title="Log this trade to Positions"
+                            >
+                              +
+                            </button>
+                          </div>
                         </td>
                         <td className="px-5 py-4">
                           <span
@@ -717,23 +728,10 @@ export function ScreenerClient() {
                         <td className="px-5 py-4 text-right tabular-nums font-medium text-emerald-400">
                           {row.signalScore}
                         </td>
-                        <td className="px-5 py-4 text-right shrink-0 whitespace-nowrap">
-                          <button
-                            type="button"
-                            onClick={e => {
-                              e.stopPropagation();
-                              setLogModal({ row, tradePlan: selectedRow === `${row.ticker}-${row.strike}-${row.type}-${row.expiration}` ? tradePlan : null });
-                            }}
-                            className="inline-flex items-center justify-center h-7 w-7 rounded-full border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/25 transition text-base font-bold"
-                            title="Log this trade to Positions"
-                          >
-                            +
-                          </button>
-                        </td>
                       </tr>
                       {selectedRow === `${row.ticker}-${row.strike}-${row.type}-${row.expiration}` && (
                         <tr key={`plan-${row.ticker}-${row.strike}-${i}`}>
-                          <td colSpan={10} className="px-5 py-5 bg-zinc-900/80 border-b border-zinc-800/80">
+                          <td colSpan={9} className="px-5 py-5 bg-zinc-900/80 border-b border-zinc-800/80">
                             {planLoading && (
                               <div className="flex items-center gap-3 text-sm text-emerald-300">
                                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-500/30 border-t-emerald-400" />
