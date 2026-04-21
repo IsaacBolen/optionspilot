@@ -73,100 +73,6 @@ const DEFAULT_STATS: StatCard[] = [
   },
 ];
 
-const DEFAULT_ROWS: ScreenerRow[] = [
-  {
-    ticker: "TSLA",
-    type: "Call",
-    strike: 250,
-    expiration: "May 2, 2025",
-    ivRank: 91,
-    volume: 12400,
-    signalScore: 94,
-    estPremium: 4.85,
-    premiumRange: "$4.20 - $5.50",
-    change24h: 1.2,
-    change1w: 3.4,
-  },
-  {
-    ticker: "NVDA",
-    type: "Put",
-    strike: 118,
-    expiration: "Apr 25, 2025",
-    ivRank: 84,
-    volume: 9100,
-    signalScore: 88,
-    estPremium: 2.1,
-    premiumRange: "$1.65 - $2.55",
-    change24h: -0.8,
-    change1w: 2.1,
-  },
-  {
-    ticker: "AAPL",
-    type: "Call",
-    strike: 195,
-    expiration: "May 9, 2025",
-    ivRank: 68,
-    volume: 4200,
-    signalScore: 78,
-    estPremium: 3.25,
-    premiumRange: "$2.80 - $3.70",
-    change24h: 0.4,
-    change1w: -1.2,
-  },
-  {
-    ticker: "SPY",
-    type: "Call",
-    strike: 528,
-    expiration: "Jun 20, 2025",
-    ivRank: 55,
-    volume: 15200,
-    signalScore: 72,
-    estPremium: 6.4,
-    premiumRange: "$5.90 - $6.90",
-    change24h: 0.15,
-    change1w: 0.9,
-  },
-  {
-    ticker: "AMD",
-    type: "Put",
-    strike: 112,
-    expiration: "May 16, 2025",
-    ivRank: 77,
-    volume: 6100,
-    signalScore: 81,
-    estPremium: 1.95,
-    premiumRange: "$1.50 - $2.40",
-    change24h: -1.1,
-    change1w: -2.3,
-  },
-  {
-    ticker: "MSFT",
-    type: "Call",
-    strike: 415,
-    expiration: "Jun 6, 2025",
-    ivRank: 49,
-    volume: 3800,
-    signalScore: 69,
-    estPremium: 5.1,
-    premiumRange: "$4.60 - $5.60",
-    change24h: 0.22,
-    change1w: 1.05,
-  },
-  {
-    ticker: "AAPL",
-    type: "Put",
-    strike: 180,
-    expiration: "Apr 18, 2025",
-    ivRank: 62,
-    volume: 8900,
-    signalScore: 75,
-    estPremium: 1.4,
-    premiumRange: "$1.10 - $1.70",
-    change24h: 0.4,
-    change1w: -1.2,
-  },
-];
-
 const SCREENER_DEFAULT_MESSAGE =
   "Suggest a handful of liquid US equity options that could fit a balanced bullish-bias book over the next few weeks.";
 
@@ -367,8 +273,12 @@ export function ScreenerClient() {
   const [prompt, setPrompt] = useState("");
   const [screenerFilter, setScreenerFilter] =
     useState<ScreenerFilter>("all");
-  const [picksRows, setPicksRows] = useState<ScreenerRow[]>(DEFAULT_ROWS);
-  const [statCards, setStatCards] = useState<StatCard[]>(DEFAULT_STATS);
+  const [picksRows, setPicksRows] = useState<ScreenerRow[]>([]);
+  const [statCards, setStatCards] = useState<StatCard[]>([
+    { label: "Opportunities Found", value: "—", hint: "Run a search to see results" },
+    { label: "Highest Signal", value: "—", hint: "Run a search to see results" },
+    { label: "Avg IV Rank", value: "—", hint: "Run a search to see results" },
+  ]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [selectedRow, setSelectedRow] = useState<string | null>(null);
@@ -633,6 +543,12 @@ export function ScreenerClient() {
               </div>
             </div>
             <div className="overflow-x-auto">
+              {filteredScreenerRows.length === 0 && !isAnalyzing ? (
+                <div className="flex flex-col items-center justify-center py-20 text-center">
+                  <p className="text-sm font-medium text-zinc-400">No results yet</p>
+                  <p className="mt-1 text-xs text-zinc-600">Describe the trade you are looking for above and hit Find Trades</p>
+                </div>
+              ) : (
               <table className="w-full min-w-0 text-left text-sm">
                 <thead>
                   <tr className="border-b border-zinc-800/80 bg-zinc-950/40 text-xs font-medium uppercase tracking-wider text-zinc-500">
@@ -787,6 +703,7 @@ export function ScreenerClient() {
                   ))}
                 </tbody>
               </table>
+              )}
             </div>
           </section>
         </div>
