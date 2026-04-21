@@ -13,7 +13,7 @@ type PositionRow = {
   type: "Call" | "Put";
   strike: number;
   expiration: string;
-  qty: number;
+  quantity: number;
   entry_price: number;
   current_price: number | null;
   status: PositionStatus;
@@ -22,6 +22,66 @@ type PositionRow = {
   ai_thesis: string | null;
   created_at: string;
 };
+
+function normalizePositionFromApi(raw: unknown): PositionRow | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const id = r.id != null ? String(r.id) : "";
+  if (!id) return null;
+  const ticker = String(r.ticker ?? "").trim().toUpperCase();
+  if (!ticker) return null;
+  const typeRaw = String(r.type ?? "").trim();
+  const type: "Call" | "Put" = typeRaw === "Put" ? "Put" : "Call";
+  const strike = Number(r.strike);
+  if (!Number.isFinite(strike)) return null;
+  const expiration = String(r.expiration ?? "").trim();
+  if (!expiration) return null;
+  const qtyRaw = r.quantity ?? r.qty;
+  const quantity = Math.round(Number(qtyRaw));
+  if (!Number.isFinite(quantity) || quantity < 0) return null;
+  const entry_price = Number(r.entry_price);
+  if (!Number.isFinite(entry_price)) return null;
+  const cur = r.current_price;
+  const current_price =
+    cur === null || cur === undefined
+      ? null
+      : Number.isFinite(Number(cur))
+        ? Number(cur)
+        : null;
+  const status: PositionStatus = r.status === "Closed" ? "Closed" : "Open";
+  const platform =
+    r.platform === null || r.platform === undefined
+      ? null
+      : String(r.platform);
+  const signal_score =
+    r.signal_score === null || r.signal_score === undefined
+      ? null
+      : Number.isFinite(Number(r.signal_score))
+        ? Number(r.signal_score)
+        : null;
+  const ai_thesis =
+    r.ai_thesis === null || r.ai_thesis === undefined
+      ? null
+      : String(r.ai_thesis);
+  const created_at =
+    r.created_at != null ? String(r.created_at) : "";
+
+  return {
+    id,
+    ticker,
+    type,
+    strike,
+    expiration,
+    quantity,
+    entry_price,
+    current_price,
+    status,
+    platform,
+    signal_score,
+    ai_thesis,
+    created_at,
+  };
+}
 
 type PositionReport = {
   ticker: string;
@@ -55,10 +115,13 @@ export function PositionsClient() {
   const [reportVisible, setReportVisible] = useState(false);
 
   useEffect(() => {
-    fetch('/api/positions')
-      .then(r => r.json())
-      .then((data: { positions?: PositionRow[] }) => {
-        setPositions(data.positions ?? []);
+    fetch("/api/positions")
+      .then((r) => r.json())
+      .then((data: { positions?: unknown[] }) => {
+        const list = (data.positions ?? [])
+          .map(normalizePositionFromApi)
+          .filter((p): p is PositionRow => p !== null);
+        setPositions(list);
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -74,16 +137,18 @@ export function PositionsClient() {
 
   const openPositions = positions.filter(p => p.status === 'Open').length;
   const totalPnl = positions.reduce((sum, row) => {
-    const pnlDollar = row.current_price != null
-      ? (row.current_price - row.entry_price) * row.qty * 100
-      : 0;
+    const pnlDollar =
+      row.current_price != null
+        ? (row.current_price - row.entry_price) * row.quantity * 100
+        : 0;
     return sum + pnlDollar;
   }, 0);
   const closedPositions = positions.filter((p) => p.status === "Closed");
   const wins = closedPositions.filter((row) => {
-    const pnlDollar = row.current_price != null
-      ? (row.current_price - row.entry_price) * row.qty * 100
-      : 0;
+    const pnlDollar =
+      row.current_price != null
+        ? (row.current_price - row.entry_price) * row.quantity * 100
+        : 0;
     return pnlDollar > 0;
   }).length;
   const winRate = closedPositions.length > 0
@@ -306,9 +371,16 @@ export function PositionsClient() {
           </div>
           <div className="overflow-x-auto">
             {loading ? (
-              <div className="flex flex-col items-center justify-center gap-3 px-5 py-10">
-                <div className="h-9 w-9 animate-spin rounded-full border-2 border-emerald-500/30 border-t-emerald-400" />
-                <p className="text-sm text-zinc-400">Loading positions...</p>
+              <div className="flex items-center justify-center py-20 text-sm text-zinc-500">
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-400 mr-3" />
+                Loading positions...
+              </div>
+            ) : positions.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <p className="text-sm font-medium text-zinc-400">No positions yet</p>
+                <p className="mt-1 text-xs text-zinc-600">
+                  Use the Screener to find a trade and hit + to log it here
+                </p>
               </div>
             ) : (
               <table className="w-full min-w-[1040px] text-left text-sm">
@@ -328,12 +400,18 @@ export function PositionsClient() {
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {rows.map((row, i) => {
-                    const pnlDollar = row.current_price != null
-                      ? (row.current_price - row.entry_price) * row.qty * 100
-                      : 0;
-                    const pnlPct = row.current_price != null && row.entry_price > 0
-                      ? ((row.current_price - row.entry_price) / row.entry_price) * 100
-                      : 0;
+                    const pnlDollar =
+                      row.current_price != null
+                        ? (row.current_price - row.entry_price) *
+                          row.quantity *
+                          100
+                        : 0;
+                    const pnlPct =
+                      row.current_price != null && row.entry_price > 0
+                        ? ((row.current_price - row.entry_price) /
+                            row.entry_price) *
+                          100
+                        : 0;
                     return (
                       <tr
                         key={`${row.ticker}-${row.strike}-${row.type}-${row.status}-${i}`}
@@ -360,13 +438,15 @@ export function PositionsClient() {
                           {row.expiration}
                         </td>
                         <td className="px-5 py-4 text-right tabular-nums">
-                          {row.qty}
+                          {row.quantity}
                         </td>
                         <td className="px-5 py-4 text-right tabular-nums">
                           {formatPrice(row.entry_price)}
                         </td>
                         <td className="px-5 py-4 text-right tabular-nums">
-                          {formatPrice(row.current_price ?? 0)}
+                          {row.current_price != null
+                            ? formatPrice(row.current_price)
+                            : "—"}
                         </td>
                         <td
                           className={`px-5 py-4 text-right tabular-nums font-medium ${

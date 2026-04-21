@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 import { AppChrome } from "../components/app-chrome";
 
@@ -264,6 +264,16 @@ function LogTradeModal({
   const [platform, setPlatform] = useState('Robinhood');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (state) {
+      setQty(1);
+      setEntryPrice(state.row.estPremium ?? 0);
+      setPlatform("Robinhood");
+      setSaving(false);
+      setSaved(false);
+    }
+  }, [state]);
 
   if (!state) return null;
   const { row } = state;
@@ -623,7 +633,7 @@ export function ScreenerClient() {
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1040px] text-left text-sm">
+              <table className="w-full min-w-[1180px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-zinc-800/80 bg-zinc-950/40 text-xs font-medium uppercase tracking-wider text-zinc-500">
                     <th className="px-5 py-3.5">Ticker</th>
@@ -707,8 +717,9 @@ export function ScreenerClient() {
                         <td className="px-5 py-4 text-right tabular-nums font-medium text-emerald-400">
                           {row.signalScore}
                         </td>
-                        <td className="px-5 py-4 text-right">
+                        <td className="px-5 py-4 text-right shrink-0 whitespace-nowrap">
                           <button
+                            type="button"
                             onClick={e => {
                               e.stopPropagation();
                               setLogModal({ row, tradePlan: selectedRow === `${row.ticker}-${row.strike}-${row.type}-${row.expiration}` ? tradePlan : null });
