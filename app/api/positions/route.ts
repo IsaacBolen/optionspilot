@@ -53,3 +53,59 @@ export async function POST(request: Request) {
   }
   return NextResponse.json({ position: data });
 }
+
+// PATCH — close a position or update it
+export async function PATCH(request: Request) {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  }
+
+  const { id, exit_price, quantity_sold, closed_at } = body as {
+    id: string;
+    exit_price: number;
+    quantity_sold: number;
+    closed_at: string;
+  };
+
+  const { data, error } = await supabase
+    .from('positions')
+    .update({
+      exit_price,
+      current_price: exit_price,
+      status: 'Closed',
+      closed_at,
+    })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  return NextResponse.json({ position: data });
+}
+
+// DELETE — remove a position entirely
+export async function DELETE(request: Request) {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  }
+
+  const { id } = body as { id: string };
+
+  const { error } = await supabase
+    .from('positions')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  return NextResponse.json({ success: true });
+}

@@ -16,12 +16,136 @@ type PositionRow = {
   quantity: number;
   entry_price: number;
   current_price: number | null;
+  exit_price?: number | null;
   status: PositionStatus;
   platform: string | null;
   signal_score: number | null;
   ai_thesis: string | null;
   created_at: string;
 };
+
+type CloseModalState = {
+  position: PositionRow;
+} | null;
+
+function ClosePositionModal({
+  state,
+  onClose,
+  onConfirm,
+}: {
+  state: CloseModalState;
+  onClose: () => void;
+  onConfirm: (exitPrice: number, qtySold: number, closedAt: string) => Promise<void>;
+}) {
+  const [exitPrice, setExitPrice] = useState(0);
+  const [qtySold, setQtySold] = useState(state?.position.quantity ?? 1);
+  const [closedAt, setClosedAt] = useState(new Date().toISOString().split("T")[0]);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (state) {
+      setExitPrice(0);
+      setQtySold(state.position.quantity);
+      setClosedAt(new Date().toISOString().split("T")[0]);
+      setSaving(false);
+      setSaved(false);
+    }
+  }, [state]);
+
+  if (!state) return null;
+  const { position } = state;
+  const pnl = (exitPrice - position.entry_price) * qtySold * 100;
+  const pnlPct = position.entry_price > 0
+    ? ((exitPrice - position.entry_price) / position.entry_price) * 100
+    : 0;
+
+  const handleConfirm = async () => {
+    setSaving(true);
+    await onConfirm(exitPrice, qtySold, closedAt);
+    setSaving(false);
+    setSaved(true);
+    setTimeout(() => {
+      setSaved(false);
+      onClose();
+    }, 1200);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+      <div className="w-full max-w-md rounded-2xl border border-zinc-700/80 bg-zinc-900 p-6 shadow-2xl">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-base font-semibold text-white">Close Position</h3>
+          <button type="button" onClick={onClose} className="text-zinc-500 hover:text-zinc-300 text-xl leading-none">×</button>
+        </div>
+
+        <div className="mb-5 rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
+          <div className="flex items-center gap-3">
+            <span className="text-lg font-bold text-white">{position.ticker}</span>
+            <span className={position.type === "Call"
+              ? "rounded-md bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-300"
+              : "rounded-md bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-300"
+            }>{position.type}</span>
+            <span className="text-sm text-zinc-400">${position.strike} · {position.expiration}</span>
+          </div>
+          <p className="mt-1 text-xs text-zinc-500">Entry: ${position.entry_price}/share</p>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Exit Price (per share)</label>
+            <input
+              type="number"
+              step={0.01}
+              min={0}
+              value={exitPrice}
+              onChange={(e) => setExitPrice(parseFloat(e.target.value) || 0)}
+              className="mt-1.5 w-full rounded-xl border border-zinc-700/80 bg-zinc-950/80 px-4 py-2.5 text-sm text-white focus:border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Contracts Sold</label>
+            <input
+              type="number"
+              min={1}
+              value={qtySold}
+              onChange={(e) => setQtySold(Math.max(1, parseInt(e.target.value, 10) || 1))}
+              className="mt-1.5 w-full rounded-xl border border-zinc-700/80 bg-zinc-950/80 px-4 py-2.5 text-sm text-white focus:border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Date Sold</label>
+            <input
+              type="date"
+              value={closedAt}
+              onChange={(e) => setClosedAt(e.target.value)}
+              className="mt-1.5 w-full rounded-xl border border-zinc-700/80 bg-zinc-950/80 px-4 py-2.5 text-sm text-white focus:border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
+            />
+          </div>
+
+          {exitPrice > 0 && (
+            <div className={`rounded-xl border p-3 ${pnl >= 0 ? "border-emerald-500/20 bg-emerald-500/5" : "border-red-500/20 bg-red-500/5"}`}>
+              <p className="text-xs text-zinc-500 mb-1">Estimated P&L</p>
+              <p className={`text-lg font-bold ${pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                {pnl >= 0 ? "+" : ""}${pnl.toFixed(0)}
+                <span className="ml-2 text-sm font-medium">({pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%)</span>
+              </p>
+            </div>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={handleConfirm}
+          disabled={saving || saved || exitPrice <= 0}
+          className="mt-6 w-full rounded-xl bg-emerald-500 py-3 text-sm font-semibold text-zinc-950 shadow-[0_0_24px_rgba(16,185,129,0.35)] transition hover:bg-emerald-400 disabled:opacity-60"
+        >
+          {saved ? "✓ Position Closed!" : saving ? "Saving..." : "Confirm Close"}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function normalizePositionFromApi(raw: unknown): PositionRow | null {
   if (!raw || typeof raw !== "object") return null;
@@ -65,6 +189,13 @@ function normalizePositionFromApi(raw: unknown): PositionRow | null {
       : String(r.ai_thesis);
   const created_at =
     r.created_at != null ? String(r.created_at) : "";
+  const ex = r.exit_price;
+  const exit_price =
+    ex === null || ex === undefined
+      ? undefined
+      : Number.isFinite(Number(ex))
+        ? Number(ex)
+        : null;
 
   return {
     id,
@@ -75,6 +206,7 @@ function normalizePositionFromApi(raw: unknown): PositionRow | null {
     quantity,
     entry_price,
     current_price,
+    exit_price,
     status,
     platform,
     signal_score,
@@ -113,6 +245,7 @@ export function PositionsClient() {
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportVisible, setReportVisible] = useState(false);
+  const [closeModal, setCloseModal] = useState<CloseModalState>(null);
 
   useEffect(() => {
     fetch("/api/positions")
@@ -186,6 +319,45 @@ export function PositionsClient() {
     } finally {
       setReportLoading(false);
     }
+  };
+
+  const handleClosePosition = async (
+    exitPrice: number,
+    qtySold: number,
+    closedAt: string,
+  ) => {
+    if (!closeModal) return;
+    await fetch("/api/positions", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: closeModal.position.id,
+        exit_price: exitPrice,
+        quantity_sold: qtySold,
+        closed_at: closedAt,
+      }),
+    });
+    setPositions((prev) =>
+      prev.map((p) =>
+        p.id === closeModal.position.id
+          ? {
+              ...p,
+              status: "Closed" as const,
+              current_price: exitPrice,
+              exit_price: exitPrice,
+            }
+          : p,
+      ),
+    );
+  };
+
+  const handleDeletePosition = async (id: string) => {
+    await fetch("/api/positions", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    setPositions((prev) => prev.filter((p) => p.id !== id));
   };
 
   return (
@@ -396,6 +568,7 @@ export function PositionsClient() {
                     <th className="px-5 py-3.5 text-right">P&amp;L $</th>
                     <th className="px-5 py-3.5 text-right">P&amp;L %</th>
                     <th className="px-5 py-3.5">Status</th>
+                    <th className="px-5 py-3.5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
@@ -482,6 +655,28 @@ export function PositionsClient() {
                             {row.status}
                           </span>
                         </td>
+                        <td className="px-5 py-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            {row.status === "Open" && (
+                              <button
+                                type="button"
+                                onClick={() => setCloseModal({ position: row })}
+                                className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20 transition"
+                                title="Close this position"
+                              >
+                                Close
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => void handleDeletePosition(row.id)}
+                              className="rounded-lg border border-red-500/20 bg-red-500/10 px-2.5 py-1 text-xs font-medium text-red-400 hover:bg-red-500/20 transition"
+                              title="Delete this position"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     );
                   })}
@@ -491,6 +686,11 @@ export function PositionsClient() {
           </div>
         </section>
       </main>
+      <ClosePositionModal
+        state={closeModal}
+        onClose={() => setCloseModal(null)}
+        onConfirm={handleClosePosition}
+      />
     </AppChrome>
   );
 }
