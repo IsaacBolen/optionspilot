@@ -7,12 +7,21 @@ const REPORT_SYSTEM = `You are an options trading coach giving a daily situation
 
 Today's date is provided in the prompt. Use it to calculate exact days until expiration and to generate specific calendar dates for check-ins.
 
+MOST IMPORTANT RULE — ALWAYS CHECK CURRENT P&L FIRST:
+Before doing anything else, look at the current P&L percentage provided for each position. This is the most important input.
+- If current P&L is already at or above 40%: The trader has already hit their minimum target. Lead your summary with this fact. Make the case for taking profit now vs holding for more. Be direct — "You are already up X% which meets your minimum target."
+- If current P&L is already at or above 60%: The trader has exceeded their target. Strongly recommend considering a sell. The risk of giving back gains outweighs chasing more upside. Recommend "Consider Selling" or "Sell Now" unless there is an exceptionally strong reason to hold.
+- If current P&L is between 20-40%: Good progress. Hold but tighten your mental stop. Do not let a winner turn into a loser.
+- If current P&L is below 20%: Position has not moved meaningfully yet. Evaluate whether the thesis is still intact and whether there is enough time left.
+- If current P&L is negative: Assess whether the thesis is broken or just needs more time. Flag urgency based on days remaining.
+
 CRITICAL RULES FOR EXIT TARGETS:
 - Always calculate the baseline exit target from the actual entry price. Example: entry $2.05, targeting 50% gain = exit at $3.08/share ($308/contract).
 - Then reason about whether current conditions justify revising that target up or down.
 - If the target has changed from what the original thesis implied, show the previous target and the new target and explain why in one sentence.
 - If nothing material has changed, say: "No change — target remains $X.XX/share ($XXX/contract). Thesis intact."
 - Always include both the per-share price AND the per-contract dollar amount in parentheses.
+- If the trader is already past the minimum target, also show what the current profit is in dollar terms so they can see exactly what they would be locking in.
 
 CRITICAL RULES FOR CHECK-IN DATES:
 - Provide exactly 3 specific calendar dates (e.g. "April 24") with a one-line reason for each.
@@ -27,12 +36,12 @@ Return ONLY a JSON array where each item has exactly this shape:
   "strike": 205,
   "recommendation": "Hold" | "Consider Selling" | "Sell Now" | "Already Expired",
   "urgency": "Low" | "Medium" | "High",
-  "summary": "2-3 sentences explaining current conditions and why you recommend this action. Be direct — if the thesis is broken say so, if it is working say that too.",
+  "summary": "2-3 sentences. ALWAYS start by stating the current P&L percentage and whether it has hit the minimum target. Then give your recommendation reasoning.",
   "exitTarget": {
     "previousTarget": "$3.08/share ($308/contract)",
     "currentTarget": "$3.50/share ($350/contract)",
     "changed": true,
-    "reason": "NVDA momentum has strengthened since entry — raising target to capture more upside before expiry."
+    "reason": "Already past minimum 40% target — locking in $105/contract profit now is a valid decision vs holding for more."
   },
   "checkInDates": [
     { "date": "April 24", "reason": "Fed speaker at 2pm EST — could move QQQ and tech names significantly." },
@@ -72,18 +81,34 @@ export async function POST(request: Request) {
 Here are the trader's open positions with their original AI trade plans:
 
 ${positions
-  .map(
-    (p, i) => `
+  .map((p, i) => {
+    const entryPrice = Number(p.entry_price);
+    const currentPrice = Number(p.current_price);
+    const hasCurrent = p.current_price != null && Number.isFinite(currentPrice);
+    const pnlPct = hasCurrent && entryPrice > 0
+      ? Math.round(((currentPrice - entryPrice) / entryPrice) * 100)
+      : null;
+    const pnlDollar = hasCurrent
+      ? Math.round((currentPrice - entryPrice) * Number(p.quantity) * 100)
+      : null;
+    const daysToExpiry = p.expiration
+      ? Math.ceil((new Date(p.expiration as string).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
+      : null;
+
+    return `
 Position ${i + 1}:
 - Ticker: ${p.ticker} ${p.type} $${p.strike} expiring ${p.expiration}
-- Entry Price: $${p.entry_price}/share (${p.quantity} contract(s) = $${Number(p.entry_price) * Number(p.quantity) * 100} total cost)
-- Current Price: ${p.current_price ? "$" + p.current_price + "/share" : "Unknown — assume unchanged from entry for target calculations"}
+- Entry Price: $${p.entry_price}/share (${p.quantity} contract(s) = $${entryPrice * Number(p.quantity) * 100} total cost)
+- Current Price: ${hasCurrent ? "$" + currentPrice + "/share" : "Unknown"}
+- Current P&L: ${pnlPct !== null ? pnlPct + "% (" + (pnlDollar! >= 0 ? "+" : "") + "$" + pnlDollar + " total)" : "Unknown — assume unchanged from entry"}
+- Has hit 40% minimum target: ${pnlPct !== null ? (pnlPct >= 40 ? "YES — already at or past minimum exit target" : "No — not yet at 40% minimum") : "Unknown"}
+- Has hit 60% maximum target: ${pnlPct !== null ? (pnlPct >= 60 ? "YES — already exceeded maximum target, strongly consider selling" : "No") : "Unknown"}
+- Days until expiration: ${daysToExpiry ?? "Unknown"}
 - Signal Score at entry: ${p.signal_score ?? "Unknown"}/100
 - Original AI Thesis: ${p.ai_thesis ?? "No thesis recorded"}
 - Date entered: ${p.created_at ? new Date(p.created_at as string | number | Date).toLocaleDateString() : "Unknown"}
-- Days until expiration: ${p.expiration ? Math.ceil((new Date(p.expiration as string).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)) : "Unknown"}
-`,
-  )
+`;
+  })
   .join("\n")}
 
 For each position:
