@@ -228,6 +228,7 @@ type PositionReport = {
     changed: boolean;
     reason: string;
   };
+  currentPrice: number | null;
   checkInDates: {
     date: string;
     reason: string;
@@ -320,7 +321,13 @@ export function PositionsClient() {
         error?: string;
       };
       if (!res.ok || !data.report) throw new Error(data.error ?? "Report failed");
-      setReport(data.report);
+      const enrichedReport = data.report.map((item: PositionReport) => {
+        const match = openPositions.find(
+          (p) => p.ticker === item.ticker && p.strike === item.strike
+        );
+        return { ...item, currentPrice: match?.current_price ?? null };
+      });
+      setReport(enrichedReport);
     } catch (e) {
       setReportError(
         e instanceof Error ? e.message : "Could not generate report",
@@ -506,14 +513,26 @@ export function PositionsClient() {
                           <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">
                             Exit Target
                           </p>
+                          <div className="flex items-center gap-3 mb-1">
+                            <p className="text-xs text-zinc-500">
+                              Current: <span className="text-white font-semibold">
+                                {item.currentPrice ? `$${item.currentPrice}/share` : "—"}
+                              </span>
+                            </p>
+                            <span className="text-zinc-700">→</span>
+                            <p className="text-xs text-zinc-500">
+                              Target: <span className="font-semibold text-emerald-300">
+                                {item.exitTarget.currentTarget}
+                              </span>
+                            </p>
+                          </div>
                           {item.exitTarget.changed ? (
                             <div className="space-y-0.5">
                               <p className="text-xs text-zinc-500 line-through">{item.exitTarget.previousTarget}</p>
-                              <p className="text-xs font-semibold text-emerald-300">{item.exitTarget.currentTarget}</p>
                               <p className="text-xs text-zinc-500 mt-1 italic">{item.exitTarget.reason}</p>
                             </div>
                           ) : (
-                            <p className="text-xs text-emerald-300">{item.exitTarget.currentTarget}</p>
+                            <p className="text-xs text-zinc-500 italic">{item.exitTarget.reason}</p>
                           )}
                         </div>
                         <div>
