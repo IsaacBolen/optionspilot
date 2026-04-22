@@ -1,5 +1,42 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
+import { polygonFetch, sleep, POLYGON_CALL_GAP_MS } from "@/lib/polygon-fetch";
+
+const POLYGON_KEY = process.env.POLYGON_API_KEY;
+
+async function fetchCurrentPrices(
+  tickers: string[],
+): Promise<Map<string, number>> {
+  const prices = new Map<string, number>();
+  if (!POLYGON_KEY) return prices;
+
+  const today = new Date();
+  const from = new Date(today);
+  from.setUTCDate(from.getUTCDate() - 5);
+  const fromStr = from.toISOString().slice(0, 10);
+  const toStr = today.toISOString().slice(0, 10);
+
+  for (let i = 0; i < tickers.length; i++) {
+    if (i > 0) await sleep(POLYGON_CALL_GAP_MS);
+    const ticker = tickers[i];
+    try {
+      const url = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(ticker)}/range/1/day/${fromStr}/${toStr}?adjusted=true&sort=asc&limit=10&apiKey=${encodeURIComponent(POLYGON_KEY)}`;
+      const res = await polygonFetch(url, 120);
+      const json = await res.json() as { results?: { c?: number }[] };
+      const results = Array.isArray(json.results) ? json.results : [];
+      const closes = results
+        .map((b) => (typeof b.c === "number" ? b.c : NaN))
+        .filter((c) => Number.isFinite(c) && c > 0);
+      if (closes.length > 0) {
+        prices.set(ticker, closes[closes.length - 1]);
+      }
+    } catch {
+      // silently skip — position will show entry price as fallback
+    }
+  }
+
+  return prices;
+}
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
@@ -76,6 +113,16 @@ export async function POST(request: Request) {
     year: "numeric",
   });
 
+  const uniqueTickers = [
+    ...new Set(
+      positions
+        .map((p) => String(p.ticker ?? "").trim().toUpperCase())
+        .filter(Boolean)
+    ),
+  ];
+
+  const livePrice = await fetchCurrentPrices(uniqueTickers);
+
   const prompt = `Today is ${today}.
 
 Here are the trader's open positions with their original AI trade plans:
@@ -83,8 +130,10 @@ Here are the trader's open positions with their original AI trade plans:
 ${positions
   .map((p, i) => {
     const entryPrice = Number(p.entry_price);
-    const currentPrice = Number(p.current_price);
-    const hasCurrent = p.current_price != null && Number.isFinite(currentPrice);
+    const ticker = String(p.ticker ?? "").trim().toUpperCase();
+    const live = livePrice.get(ticker);
+    const currentPrice = live ?? Number(p.current_price) ?? entryPrice;
+    const hasCurrent = Number.isFinite(currentPrice) && currentPrice > 0;
     const pnlPct = hasCurrent && entryPrice > 0
       ? Math.round(((currentPrice - entryPrice) / entryPrice) * 100)
       : null;
@@ -92,15 +141,18 @@ ${positions
       ? Math.round((currentPrice - entryPrice) * Number(p.quantity) * 100)
       : null;
     const daysToExpiry = p.expiration
-      ? Math.ceil((new Date(p.expiration as string).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
+      ? Math.ceil(
+          (new Date(p.expiration as string).getTime() - new Date().getTime()) /
+            (1000 * 60 * 60 * 24)
+        )
       : null;
 
     return `
 Position ${i + 1}:
 - Ticker: ${p.ticker} ${p.type} $${p.strike} expiring ${p.expiration}
 - Entry Price: $${p.entry_price}/share (${p.quantity} contract(s) = $${entryPrice * Number(p.quantity) * 100} total cost)
-- Current Price: ${hasCurrent ? "$" + currentPrice + "/share" : "Unknown"}
-- Current P&L: ${pnlPct !== null ? pnlPct + "% (" + (pnlDollar! >= 0 ? "+" : "") + "$" + pnlDollar + " total)" : "Unknown — assume unchanged from entry"}
+- Current Market Price (live from Polygon): ${hasCurrent ? "$" + currentPrice.toFixed(2) + "/share" : "Unknown"}
+- Current P&L: ${pnlPct !== null ? pnlPct + "% (" + (pnlDollar! >= 0 ? "+" : "") + "$" + pnlDollar + " total)" : "Unknown"}
 - Has hit 40% minimum target: ${pnlPct !== null ? (pnlPct >= 40 ? "YES — already at or past minimum exit target" : "No — not yet at 40% minimum") : "Unknown"}
 - Has hit 60% maximum target: ${pnlPct !== null ? (pnlPct >= 60 ? "YES — already exceeded maximum target, strongly consider selling" : "No") : "Unknown"}
 - Days until expiration: ${daysToExpiry ?? "Unknown"}
@@ -113,7 +165,7 @@ Position ${i + 1}:
 
 For each position:
 1. Calculate the baseline exit target from the entry price (assume 40-60% gain target unless the original thesis specified otherwise)
-2. Reason about whether current market conditions justify revising that target up or down
+2. Use the live current price to assess current P&L and whether the trader should act now
 3. Provide 3 specific check-in dates anchored to real calendar events or expiry math
 4. Give your honest recommendation`;
 
@@ -138,12 +190,16 @@ For each position:
     if (start === -1 || end === -1) throw new Error("No JSON array in response");
     const report = JSON.parse(candidate.slice(start, end + 1));
 
-    const prices = positions.map((p) => ({
-      id: String(p.id),
-      current_price: p.current_price ? Number(p.current_price) : null,
-    }));
+    const pricesOut = positions.map((p) => {
+      const ticker = String(p.ticker ?? "").trim().toUpperCase();
+      const live = livePrice.get(ticker);
+      return {
+        id: String(p.id),
+        current_price: live ?? null,
+      };
+    });
 
-    return NextResponse.json({ report, prices });
+    return NextResponse.json({ report, prices: pricesOut });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Report failed";
     return NextResponse.json({ error: msg }, { status: 502 });
