@@ -1,5 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
+import {
+  fetchTradierOptionQuotes,
+  buildOccSymbol,
+} from "@/lib/tradier-options";
 import { NextResponse } from "next/server";
+
+const TRADIER_KEY = process.env.TRADIER_API_KEY;
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
@@ -76,6 +82,20 @@ export async function POST(request: Request) {
     year: "numeric",
   });
 
+  // Build OCC symbols and fetch live option premiums from Tradier
+  const occSymbols = positions.map((p) =>
+    buildOccSymbol(
+      String(p.ticker ?? ""),
+      String(p.expiration ?? ""),
+      (p.type as "Call" | "Put") ?? "Call",
+      Number(p.strike),
+    )
+  );
+
+  const livePrice = TRADIER_KEY
+    ? await fetchTradierOptionQuotes(occSymbols, TRADIER_KEY)
+    : new Map<string, number>();
+
   const prompt = `Today is ${today}.
 
 Here are the trader's open positions with their original AI trade plans:
@@ -83,13 +103,16 @@ Here are the trader's open positions with their original AI trade plans:
 ${positions
   .map((p, i) => {
     const entryPrice = Number(p.entry_price);
-    const currentPrice = p.current_price ? Number(p.current_price) : null;
-    const hasCurrent = currentPrice !== null && Number.isFinite(currentPrice) && currentPrice !== entryPrice;
+    const ticker = String(p.ticker ?? "").trim().toUpperCase();
+    const occSymbol = occSymbols[i];
+    const liveCurrentPrice = livePrice.get(occSymbol) ?? null;
+    const currentPrice = liveCurrentPrice ?? (p.current_price ? Number(p.current_price) : null);
+    const hasCurrent = currentPrice !== null && Number.isFinite(currentPrice) && currentPrice > 0;
     const pnlPct = hasCurrent && entryPrice > 0
-      ? Math.round(((currentPrice! - entryPrice) / entryPrice) * 100)
+      ? Math.round(((currentPrice - entryPrice) / entryPrice) * 100)
       : null;
     const pnlDollar = hasCurrent
-      ? Math.round((currentPrice! - entryPrice) * Number(p.quantity) * 100)
+      ? Math.round((currentPrice - entryPrice) * Number(p.quantity) * 100)
       : null;
     const daysToExpiry = p.expiration
       ? Math.ceil(
@@ -100,10 +123,11 @@ ${positions
 
     return `
 Position ${i + 1}:
-- Ticker: ${p.ticker} ${p.type} $${p.strike} expiring ${p.expiration}
+- Ticker: ${ticker} ${p.type} $${p.strike} expiring ${p.expiration}
+- OCC Symbol: ${occSymbol}
 - Entry Price: $${p.entry_price}/share (${p.quantity} contract(s) = $${entryPrice * Number(p.quantity) * 100} total cost)
-- Current Option Premium: ${hasCurrent ? "$" + currentPrice!.toFixed(2) + "/share (manually updated by trader)" : "Not yet updated — assume position has not moved from entry"}
-- Current P&L: ${pnlPct !== null ? pnlPct + "% (" + (pnlDollar! >= 0 ? "+" : "") + "$" + pnlDollar + " total)" : "Unknown — no premium update logged yet"}
+- Current Option Premium (live from Tradier): ${hasCurrent ? "$" + currentPrice.toFixed(2) + "/share" : "Not available — Tradier may not have a quote yet"}
+- Current P&L: ${pnlPct !== null ? pnlPct + "% (" + (pnlDollar! >= 0 ? "+" : "") + "$" + pnlDollar + " total)" : "Unknown"}
 - Has hit 40% minimum target: ${pnlPct !== null ? (pnlPct >= 40 ? "YES — already at or past minimum exit target" : "No — not yet at 40% minimum") : "Unknown"}
 - Has hit 60% maximum target: ${pnlPct !== null ? (pnlPct >= 60 ? "YES — already exceeded maximum target, strongly consider selling" : "No") : "Unknown"}
 - Days until expiration: ${daysToExpiry ?? "Unknown"}
@@ -116,8 +140,8 @@ Position ${i + 1}:
 
 For each position:
 1. Calculate the baseline exit target from the entry price (assume 40-60% gain target unless the original thesis specified otherwise)
-2. If current option premium has been manually updated, use it to assess P&L and whether the trader should act now
-3. If no current price update exists, reason purely from time remaining, thesis strength, and signal score
+2. Use the live Tradier option premium to assess current P&L and whether the trader should act now
+3. If no live price is available, reason from time remaining, thesis strength, and signal score
 4. Provide 3 specific check-in dates anchored to real calendar events or expiry math
 5. Give your honest recommendation`;
 
@@ -142,12 +166,16 @@ For each position:
     if (start === -1 || end === -1) throw new Error("No JSON array in response");
     const report = JSON.parse(candidate.slice(start, end + 1));
 
-    const prices = positions.map((p) => ({
-      id: String(p.id),
-      current_price: p.current_price ? Number(p.current_price) : null,
-    }));
+    const pricesOut = positions.map((p, i) => {
+      const occSymbol = occSymbols[i];
+      const live = livePrice.get(occSymbol) ?? null;
+      return {
+        id: String(p.id),
+        current_price: live,
+      };
+    });
 
-    return NextResponse.json({ report, prices });
+    return NextResponse.json({ report, prices: pricesOut });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Report failed";
     return NextResponse.json({ error: msg }, { status: 502 });
