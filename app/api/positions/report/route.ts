@@ -87,8 +87,8 @@ export async function POST(request: Request) {
     buildOccSymbol(
       String(p.ticker ?? ""),
       String(p.expiration ?? ""),
-      (p.type as "Call" | "Put") ?? "Call",
-      Number(p.strike),
+      (p.option_type as "Call" | "Put") ?? "Call",
+      Number(p.strike_price),
     )
   );
 
@@ -175,7 +175,14 @@ For each position:
       };
     });
 
-    return NextResponse.json({ report, prices: pricesOut });
+    const priceUpdates = positions
+      .map((p, i) => ({
+        id: p.id,
+        current_price: livePrice.get(occSymbols[i]) ?? null,
+      }))
+      .filter((u) => u.current_price !== null);
+
+    return NextResponse.json({ report, prices: pricesOut, priceUpdates });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Report failed";
     return NextResponse.json({ error: msg }, { status: 502 });

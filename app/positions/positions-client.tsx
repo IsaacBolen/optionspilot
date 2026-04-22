@@ -318,6 +318,7 @@ export function PositionsClient() {
       });
       const data = (await res.json()) as {
         report?: PositionReport[];
+        priceUpdates?: { id: string; current_price: number | null }[];
         error?: string;
       };
       if (!res.ok || !data.report) throw new Error(data.error ?? "Report failed");
@@ -330,9 +331,9 @@ export function PositionsClient() {
       setReport(enrichedReport);
 
       // Write current prices back to Supabase and update local state
-      const prices = (data as { prices?: { id: string; current_price: number | null }[] }).prices ?? [];
+      const priceUpdates = data.priceUpdates ?? [];
       await Promise.all(
-        prices
+        priceUpdates
           .filter((p) => p.current_price !== null)
           .map((p) =>
             fetch('/api/positions', {
@@ -345,7 +346,7 @@ export function PositionsClient() {
 
       setPositions((prev) =>
         prev.map((pos) => {
-          const match = prices.find((p) => p.id === pos.id);
+          const match = priceUpdates.find((p) => p.id === pos.id);
           if (match && match.current_price !== null) {
             return { ...pos, current_price: match.current_price };
           }
