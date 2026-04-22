@@ -63,13 +63,30 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { id, exit_price, quantity_sold, closed_at } = body as {
+  const { id, exit_price, quantity_sold, closed_at, current_price } = body as {
     id: string;
-    exit_price: number;
-    quantity_sold: number;
-    closed_at: string;
+    exit_price?: number;
+    quantity_sold?: number;
+    closed_at?: string;
+    current_price?: number;
   };
 
+  // Price-only update (from daily refresh)
+  if (current_price !== undefined && exit_price === undefined) {
+    const { data, error } = await supabase
+      .from('positions')
+      .update({ current_price })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    return NextResponse.json({ position: data });
+  }
+
+  // Full close
   const { data, error } = await supabase
     .from('positions')
     .update({

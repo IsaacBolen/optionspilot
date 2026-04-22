@@ -138,7 +138,12 @@ For each position:
     if (start === -1 || end === -1) throw new Error("No JSON array in response");
     const report = JSON.parse(candidate.slice(start, end + 1));
 
-    return NextResponse.json({ report });
+    const prices = positions.map((p) => ({
+      id: String(p.id),
+      current_price: p.current_price ? Number(p.current_price) : null,
+    }));
+
+    return NextResponse.json({ report, prices });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Report failed";
     return NextResponse.json({ error: msg }, { status: 502 });

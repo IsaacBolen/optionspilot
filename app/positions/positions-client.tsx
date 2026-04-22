@@ -328,6 +328,30 @@ export function PositionsClient() {
         return { ...item, currentPrice: match?.current_price ?? null };
       });
       setReport(enrichedReport);
+
+      // Write current prices back to Supabase and update local state
+      const prices = (data as { prices?: { id: string; current_price: number | null }[] }).prices ?? [];
+      await Promise.all(
+        prices
+          .filter((p) => p.current_price !== null)
+          .map((p) =>
+            fetch('/api/positions', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: p.id, current_price: p.current_price }),
+            })
+          )
+      );
+
+      setPositions((prev) =>
+        prev.map((pos) => {
+          const match = prices.find((p) => p.id === pos.id);
+          if (match && match.current_price !== null) {
+            return { ...pos, current_price: match.current_price };
+          }
+          return pos;
+        })
+      );
     } catch (e) {
       setReportError(
         e instanceof Error ? e.message : "Could not generate report",
