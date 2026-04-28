@@ -97,22 +97,22 @@ export async function POST(request: Request) {
 
   // Build OCC symbols and fetch live option premiums from Tradier
   const occSymbols = positions.map((p, i) => {
-    const optionType = String(p.option_type ?? "");
-    const strikePrice = p.strike_price;
+    const optionType = String(p.type ?? "");
+    const strikePrice = p.strike;
     console.log("[positions/report] Position field check", {
       index: i,
       id: String(p.id ?? ""),
       ticker: String(p.ticker ?? ""),
-      option_type: optionType,
-      strike_price: strikePrice,
+      type: optionType,
+      strike: strikePrice,
       expiration: String(p.expiration ?? ""),
     });
 
     const occSymbol = buildOccSymbol(
       String(p.ticker ?? ""),
       String(p.expiration ?? ""),
-      (p.option_type as "Call" | "Put") ?? "Call",
-      Number(p.strike_price),
+      (p.type as "Call" | "Put") ?? "Call",
+      Number(p.strike),
     );
     console.log("[positions/report] Built OCC symbol", {
       index: i,
@@ -174,8 +174,8 @@ ${positions
 Position ${i + 1}:
 - ID: ${String(p.id ?? "")}
 - Ticker: ${ticker}
-- Option Type: ${String(p.option_type ?? "Unknown")}
-- Strike Price: $${Number(p.strike_price)}
+- Option Type: ${String(p.type ?? "Unknown")}
+- Strike Price: $${Number(p.strike)}
 - Expiration: ${String(p.expiration ?? "Unknown")}
 - OCC Symbol: ${occSymbol}
 - Entry Price: $${p.entry_price}/share (${p.quantity} contract(s) = $${entryPrice * Number(p.quantity) * 100} total cost)
@@ -214,10 +214,16 @@ ${positionIds.map((id) => `- ${id}`).join("\n")}`;
       .filter((b) => b.type === "text")
       .map((b) => b.text)
       .join("");
+    console.log("[positions/report] Raw Claude response text:", text);
 
     const trimmed = text.trim();
+    const positionUpdatesRegex = /<position_updates>([\s\S]*?)<\/position_updates>/i;
+    console.log(
+      "[positions/report] position_updates extraction regex:",
+      positionUpdatesRegex.toString()
+    );
     const positionUpdatesMatch = trimmed.match(
-      /<position_updates>([\s\S]*?)<\/position_updates>/i
+      positionUpdatesRegex
     );
     let positionUpdates: Array<{
       id: string;
