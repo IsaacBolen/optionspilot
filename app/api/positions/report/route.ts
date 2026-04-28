@@ -13,7 +13,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
 const REPORT_SYSTEM = `You are an options trading coach giving a daily situation report on a trader's open positions. For each position, analyze the original thesis against current market conditions and give a concrete, actionable recommendation.
 
-Return raw JSON only. Do not wrap in markdown code fences. Do not use \`\`\`json. Start your response directly with { and end with }.
+Return raw JSON only. Do not wrap in markdown code fences. Do not use \`\`\`json. Start your response directly with [ and end with ].
 
 Today's date is provided in the prompt. Use it to calculate exact days until expiration and to generate specific calendar dates for check-ins.
 
@@ -61,7 +61,18 @@ Return ONLY a JSON array where each item has exactly this shape:
   "redFlags": "Any new risks that were not present when the trade was entered. If none say None."
 }
 
-After the main JSON array, append a separate <position_updates> block exactly as instructed in the user prompt.`;
+Return only the JSON array, with no additional sections before or after.`;
+
+const SCORE_SYSTEM = `You are scoring current trade quality for open options positions.
+
+Return ONLY a JSON array. Do not use markdown or code fences.
+Each item must have exactly:
+{"id":"...","current_signal_score":75,"score_reasoning":"One or two sentences"}
+
+Scoring rules:
+- current_signal_score is an integer from 0 to 100.
+- score_reasoning should be concise and reference price progress vs entry.
+- Include exactly one item per provided position id.`;
 
 export async function POST(request: Request) {
   let body: unknown;
@@ -212,13 +223,7 @@ For each position:
 4. Provide 3 specific check-in dates anchored to real calendar events or expiry math
 5. Give your honest recommendation
 
-Position IDs that MUST be included in <position_updates>:
-${positionIds.map((id) => `- ${id}`).join("\n")}
-
-AFTER your JSON response, append this block with no modifications to the structure:
-<position_updates>
-[{"id":"ID","current_signal_score":75,"score_reasoning":"reasoning here"}]
-</position_updates>`;
+Return only the JSON array with no extra text.`;
 
   try {
     const response = await anthropic.messages.create({
@@ -238,20 +243,10 @@ AFTER your JSON response, append this block with no modifications to the structu
       .replace(/^\s*```\s*/i, "");
     const withoutFences = withoutLeadingFence.replace(/\s*```\s*$/i, "");
     const trimmed = withoutFences.trim();
-    const marker = "<position_updates>";
-    const markerLower = marker.toLowerCase();
-    const lowerTrimmed = trimmed.toLowerCase();
-    const markerIndex = lowerTrimmed.indexOf(markerLower);
-
-    const reportCandidate =
-      markerIndex === -1 ? trimmed : trimmed.slice(0, markerIndex).trim();
-    const scoresSection =
-      markerIndex === -1 ? "" : trimmed.slice(markerIndex);
-
     let report: unknown[] = [];
     try {
-      const fence = reportCandidate.match(/```(?:json)?\s*([\s\S]*?)```/i);
-      const candidate = fence ? fence[1].trim() : reportCandidate;
+      const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+      const candidate = fence ? fence[1].trim() : trimmed;
       const start = candidate.indexOf("[");
       const end = candidate.lastIndexOf("]");
       if (start === -1 || end === -1) {
@@ -269,20 +264,51 @@ AFTER your JSON response, append this block with no modifications to the structu
       score_reasoning?: string;
     }> = [];
     try {
-      if (scoresSection) {
-        const closeTag = "</position_updates>";
-        const closeIndex = scoresSection.toLowerCase().indexOf(closeTag);
-        if (closeIndex !== -1) {
-          const rawScores = scoresSection
-            .slice(marker.length, closeIndex)
-            .trim();
-          const sanitizedScores = rawScores.replace(/['‘’“”]/g, "");
-          positionUpdates = JSON.parse(sanitizedScores) as Array<{
-            id: string;
-            current_signal_score: number;
-            score_reasoning?: string;
-          }>;
-        }
+      const scoringPayload = positions.map((p, i) => {
+        const occSymbol = occSymbols[i];
+        const current = livePrice.get(occSymbol) ?? null;
+        return {
+          id: String(p.id ?? ""),
+          ticker: String(p.ticker ?? ""),
+          original_signal_score: p.signal_score ?? null,
+          entry_price: Number(p.entry_price),
+          current_price: current,
+        };
+      });
+
+      const scoringPrompt = `Score these positions and return only a JSON array:
+${JSON.stringify(scoringPayload, null, 2)}`;
+
+      const scoringResponse = await anthropic.messages.create({
+        model: "claude-sonnet-4-5",
+        max_tokens: 1024,
+        system: SCORE_SYSTEM,
+        messages: [{ role: "user", content: scoringPrompt }],
+      });
+
+      const scoringText = scoringResponse.content
+        .filter((b) => b.type === "text")
+        .map((b) => b.text)
+        .join("");
+
+      const scoringNoLead = scoringText
+        .replace(/^\s*```json\s*/i, "")
+        .replace(/^\s*```\s*/i, "");
+      const scoringTrimmed = scoringNoLead.replace(/\s*```\s*$/i, "").trim();
+      const scoringFence = scoringTrimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+      const scoringCandidate = scoringFence
+        ? scoringFence[1].trim()
+        : scoringTrimmed;
+      const scoreStart = scoringCandidate.indexOf("[");
+      const scoreEnd = scoringCandidate.lastIndexOf("]");
+      if (scoreStart !== -1 && scoreEnd !== -1) {
+        positionUpdates = JSON.parse(
+          scoringCandidate.slice(scoreStart, scoreEnd + 1)
+        ) as Array<{
+          id: string;
+          current_signal_score: number;
+          score_reasoning?: string;
+        }>;
       }
     } catch (positionErr) {
       console.error(

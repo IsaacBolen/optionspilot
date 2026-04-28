@@ -133,13 +133,31 @@ export async function fetchTradierOptionQuotes(
 
   const symbolList = symbols.join(",");
   const url = `${TRADIER_SANDBOX}/markets/options/quotes?symbols=${encodeURIComponent(symbolList)}&greeks=false`;
+  console.log("[tradier-options] fetchTradierOptionQuotes URL:", url);
+  console.log("[tradier-options] Env token presence:", {
+    TRADIER_API_TOKEN: Boolean(process.env.TRADIER_API_TOKEN),
+    TRADIER_TOKEN: Boolean(process.env.TRADIER_TOKEN),
+  });
+  const maskedToken =
+    apiKey.length > 8
+      ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`
+      : "***";
+  console.log(
+    "[tradier-options] Authorization header format:",
+    `Bearer ${maskedToken}`
+  );
   const res = await fetch(url, {
     headers: tradierHeaders(apiKey),
     next: { revalidate: 0 },
   });
+  const rawBody = await res.text();
+  console.log("[tradier-options] Raw Tradier response:", {
+    status: res.status,
+    body: rawBody,
+  });
   if (!res.ok) return prices;
 
-  const json = await res.json() as {
+  const json = JSON.parse(rawBody) as {
     quotes?: {
       quote?: unknown;
     };
