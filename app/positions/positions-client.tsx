@@ -343,14 +343,50 @@ export function PositionsClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ positions: openPositions }),
       });
-      const data = (await res.json()) as {
+      const rawResponse = await res.text();
+      console.log("Raw /api/positions/report response:", rawResponse);
+
+      let data: {
         report?: PositionReport[];
         priceUpdates?: { id: string; current_price: number | null }[];
-        positionUpdates?: { id: string; current_signal_score: number; score_reasoning?: string }[];
+        positionUpdates?:
+          | { id: string; current_signal_score: number; score_reasoning?: string }[]
+          | string;
         error?: string;
       };
+      try {
+        data = JSON.parse(rawResponse) as {
+          report?: PositionReport[];
+          priceUpdates?: { id: string; current_price: number | null }[];
+          positionUpdates?:
+            | { id: string; current_signal_score: number; score_reasoning?: string }[]
+            | string;
+          error?: string;
+        };
+      } catch (parseErr) {
+        console.error("Failed to parse top-level report response JSON:", parseErr);
+        throw new Error("Could not parse report response JSON");
+      }
+
       if (!res.ok || !data.report) throw new Error(data.error ?? "Report failed");
-      const positionUpdates = data.positionUpdates ?? [];
+
+      let positionUpdates: { id: string; current_signal_score: number; score_reasoning?: string }[] = [];
+      if (typeof data.positionUpdates === "string") {
+        try {
+          positionUpdates = JSON.parse(data.positionUpdates) as {
+            id: string;
+            current_signal_score: number;
+            score_reasoning?: string;
+          }[];
+        } catch (positionUpdatesErr) {
+          console.error("Failed to parse positionUpdates JSON:", positionUpdatesErr);
+          console.error("Raw positionUpdates payload:", data.positionUpdates);
+          positionUpdates = [];
+        }
+      } else {
+        positionUpdates = data.positionUpdates ?? [];
+      }
+
       const enrichedReport = data.report.map((item: PositionReport) => {
         const match = openPositions.find(
           (p) => p.ticker === item.ticker && p.strike === item.strike
