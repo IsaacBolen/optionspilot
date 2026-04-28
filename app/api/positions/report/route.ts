@@ -13,6 +13,8 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
 const REPORT_SYSTEM = `You are an options trading coach giving a daily situation report on a trader's open positions. For each position, analyze the original thesis against current market conditions and give a concrete, actionable recommendation.
 
+Return raw JSON only. Do not wrap in markdown code fences. Do not use \`\`\`json. Start your response directly with { and end with }.
+
 Today's date is provided in the prompt. Use it to calculate exact days until expiration and to generate specific calendar dates for check-ins.
 
 MOST IMPORTANT RULE — ALWAYS CHECK CURRENT P&L FIRST:
@@ -231,7 +233,11 @@ AFTER your JSON response, append this block with no modifications to the structu
       .map((b) => b.text)
       .join("");
 
-    const trimmed = text.trim();
+    const withoutLeadingFence = text
+      .replace(/^\s*```json\s*/i, "")
+      .replace(/^\s*```\s*/i, "");
+    const withoutFences = withoutLeadingFence.replace(/\s*```\s*$/i, "");
+    const trimmed = withoutFences.trim();
     const marker = "<position_updates>";
     const markerLower = marker.toLowerCase();
     const lowerTrimmed = trimmed.toLowerCase();
