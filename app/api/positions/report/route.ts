@@ -11,17 +11,7 @@ const TRADIER_KEY = process.env.TRADIER_API_KEY;
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
-const REPORT_SYSTEM = `Return your ENTIRE response as one valid JSON object with exactly two keys:
-{
-  "report": [/* existing report array */],
-  "positionUpdates": [
-    { "id": "POSITION_ID_HERE", "current_signal_score": 75, "score_reasoning": "One or two sentences with no apostrophes or quotes" }
-  ]
-}
-
-No markdown, no code fences, no commentary outside this JSON object.
-
-You are an options trading coach giving a daily situation report on a trader's open positions. For each position, analyze the original thesis against current market conditions and give a concrete, actionable recommendation.
+const REPORT_SYSTEM = `You are an options trading coach giving a daily situation report on a trader's open positions. For each position, analyze the original thesis against current market conditions and give a concrete, actionable recommendation.
 
 Today's date is provided in the prompt. Use it to calculate exact days until expiration and to generate specific calendar dates for check-ins.
 
@@ -47,7 +37,7 @@ CRITICAL RULES FOR CHECK-IN DATES:
 - The other 2 dates should be tied to real upcoming events: Fed meetings, earnings, economic data releases, or key technical levels. If no known events, use logical time-based checkpoints.
 - Never use vague language like "next week" or "soon". Always use specific dates.
 
-The "report" array must use items with exactly this shape:
+Return ONLY a JSON array where each item has exactly this shape:
 {
   "ticker": "NVDA",
   "type": "Call",
@@ -69,7 +59,7 @@ The "report" array must use items with exactly this shape:
   "redFlags": "Any new risks that were not present when the trade was entered. If none say None."
 }
 
-Your "positionUpdates" array must include every position id provided in the prompt, one entry per id.`;
+After the main JSON array, append a separate <position_updates> block exactly as instructed in the user prompt.`;
 
 export async function POST(request: Request) {
   let body: unknown;
@@ -223,7 +213,10 @@ For each position:
 Position IDs that MUST be included in <position_updates>:
 ${positionIds.map((id) => `- ${id}`).join("\n")}
 
-YOU MUST return one JSON object with keys "report" and "positionUpdates". This is mandatory. If you do not include both keys the response is invalid.`;
+AFTER your JSON response, append this block with no modifications to the structure:
+<position_updates>
+[{"id":"ID","current_signal_score":75,"score_reasoning":"reasoning here"}]
+</position_updates>`;
 
   try {
     const response = await anthropic.messages.create({
@@ -239,18 +232,59 @@ YOU MUST return one JSON object with keys "report" and "positionUpdates". This i
       .join("");
 
     const trimmed = text.trim();
-    const parsed = JSON.parse(trimmed) as {
-      report?: unknown[];
-      positionUpdates?: Array<{
-        id: string;
-        current_signal_score: number;
-        score_reasoning?: string;
-      }>;
-    };
-    const report = Array.isArray(parsed.report) ? parsed.report : [];
-    const positionUpdates = Array.isArray(parsed.positionUpdates)
-      ? parsed.positionUpdates
-      : [];
+    const marker = "<position_updates>";
+    const markerLower = marker.toLowerCase();
+    const lowerTrimmed = trimmed.toLowerCase();
+    const markerIndex = lowerTrimmed.indexOf(markerLower);
+
+    const reportCandidate =
+      markerIndex === -1 ? trimmed : trimmed.slice(0, markerIndex).trim();
+    const scoresSection =
+      markerIndex === -1 ? "" : trimmed.slice(markerIndex);
+
+    let report: unknown[] = [];
+    try {
+      const fence = reportCandidate.match(/```(?:json)?\s*([\s\S]*?)```/i);
+      const candidate = fence ? fence[1].trim() : reportCandidate;
+      const start = candidate.indexOf("[");
+      const end = candidate.lastIndexOf("]");
+      if (start === -1 || end === -1) {
+        throw new Error("No JSON array in report section");
+      }
+      report = JSON.parse(candidate.slice(start, end + 1)) as unknown[];
+    } catch (reportErr) {
+      console.error("[positions/report] Failed parsing report JSON:", reportErr);
+      report = [];
+    }
+
+    let positionUpdates: Array<{
+      id: string;
+      current_signal_score: number;
+      score_reasoning?: string;
+    }> = [];
+    try {
+      if (scoresSection) {
+        const closeTag = "</position_updates>";
+        const closeIndex = scoresSection.toLowerCase().indexOf(closeTag);
+        if (closeIndex !== -1) {
+          const rawScores = scoresSection
+            .slice(marker.length, closeIndex)
+            .trim();
+          const sanitizedScores = rawScores.replace(/['‘’“”]/g, "");
+          positionUpdates = JSON.parse(sanitizedScores) as Array<{
+            id: string;
+            current_signal_score: number;
+            score_reasoning?: string;
+          }>;
+        }
+      }
+    } catch (positionErr) {
+      console.error(
+        "[positions/report] Failed parsing position_updates JSON:",
+        positionErr
+      );
+      positionUpdates = [];
+    }
 
     const pricesOut = positions.map((p, i) => {
       const occSymbol = occSymbols[i];
