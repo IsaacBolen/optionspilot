@@ -57,7 +57,15 @@ Return ONLY a JSON array where each item has exactly this shape:
   "redFlags": "Any new risks that were not present when the trade was entered. If none say None."
 }
 
-No markdown, no commentary outside the JSON array.`;
+No markdown, no commentary outside the JSON array.
+
+At the very end of your response, append this exact tag-wrapped JSON block:
+<position_updates>
+[{"id": "...", "current_signal_score": 74, "score_reasoning": "...1-2 sentences..."}]
+</position_updates>
+
+The "id" must match each position id provided in the prompt.
+In score_reasoning, never use apostrophes or quotation marks. Use plain text only.`;
 
 export async function POST(request: Request) {
   let body: unknown;
@@ -123,15 +131,20 @@ ${positions
 
     return `
 Position ${i + 1}:
-- Ticker: ${ticker} ${p.type} $${p.strike} expiring ${p.expiration}
+- ID: ${String(p.id ?? "")}
+- Ticker: ${ticker}
+- Option Type: ${String(p.option_type ?? "Unknown")}
+- Strike Price: $${Number(p.strike_price)}
+- Expiration: ${String(p.expiration ?? "Unknown")}
 - OCC Symbol: ${occSymbol}
 - Entry Price: $${p.entry_price}/share (${p.quantity} contract(s) = $${entryPrice * Number(p.quantity) * 100} total cost)
 - Current Option Premium (live from Tradier): ${hasCurrent ? "$" + currentPrice.toFixed(2) + "/share" : "Not available — Tradier may not have a quote yet"}
+- Current P&L Percent: ${pnlPct !== null ? pnlPct + "%" : "Unknown"}
 - Current P&L: ${pnlPct !== null ? pnlPct + "% (" + (pnlDollar! >= 0 ? "+" : "") + "$" + pnlDollar + " total)" : "Unknown"}
 - Has hit 40% minimum target: ${pnlPct !== null ? (pnlPct >= 40 ? "YES — already at or past minimum exit target" : "No — not yet at 40% minimum") : "Unknown"}
 - Has hit 60% maximum target: ${pnlPct !== null ? (pnlPct >= 60 ? "YES — already exceeded maximum target, strongly consider selling" : "No") : "Unknown"}
 - Days until expiration: ${daysToExpiry ?? "Unknown"}
-- Signal Score at entry: ${p.signal_score ?? "Unknown"}/100
+- Original Signal Score: ${p.signal_score ?? "Unknown"}/100
 - Original AI Thesis: ${p.ai_thesis ?? "No thesis recorded"}
 - Date entered: ${p.created_at ? new Date(p.created_at as string | number | Date).toLocaleDateString() : "Unknown"}
 `;
@@ -159,8 +172,34 @@ For each position:
       .join("");
 
     const trimmed = text.trim();
-    const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    const candidate = fence ? fence[1].trim() : trimmed;
+    const positionUpdatesMatch = trimmed.match(
+      /<position_updates>([\s\S]*?)<\/position_updates>/i
+    );
+    let positionUpdates: Array<{
+      id: string;
+      current_signal_score: number;
+      score_reasoning?: string;
+    }> = [];
+    if (positionUpdatesMatch) {
+      const rawPositionUpdates = positionUpdatesMatch[1].trim();
+      // Normalize single-quoted values to double-quoted JSON strings.
+      const sanitizedPositionUpdates = rawPositionUpdates.replace(
+        /'([^'\\]*(?:\\.[^'\\]*)*)'/g,
+        (_, value: string) => `"${value.replace(/"/g, '\\"')}"`
+      );
+      try {
+        positionUpdates = JSON.parse(sanitizedPositionUpdates);
+      } catch {
+        console.error("Failed to parse <position_updates> block:", rawPositionUpdates);
+        positionUpdates = [];
+      }
+    }
+
+    const reportCandidate = positionUpdatesMatch
+      ? trimmed.replace(positionUpdatesMatch[0], "").trim()
+      : trimmed;
+    const fence = reportCandidate.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fence ? fence[1].trim() : reportCandidate;
     const start = candidate.indexOf("[");
     const end = candidate.lastIndexOf("]");
     if (start === -1 || end === -1) throw new Error("No JSON array in response");
@@ -182,7 +221,7 @@ For each position:
       }))
       .filter((u) => u.current_price !== null);
 
-    return NextResponse.json({ report, prices: pricesOut, priceUpdates });
+    return NextResponse.json({ report, prices: pricesOut, priceUpdates, positionUpdates });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Report failed";
     return NextResponse.json({ error: msg }, { status: 502 });

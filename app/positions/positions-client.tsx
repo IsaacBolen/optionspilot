@@ -20,7 +20,9 @@ type PositionRow = {
   status: PositionStatus;
   platform: string | null;
   signal_score: number | null;
+  current_signal_score?: number | null;
   ai_thesis: string | null;
+  last_refreshed_at?: string | null;
   created_at: string;
 };
 
@@ -187,6 +189,16 @@ function normalizePositionFromApi(raw: unknown): PositionRow | null {
     r.ai_thesis === null || r.ai_thesis === undefined
       ? null
       : String(r.ai_thesis);
+  const current_signal_score =
+    r.current_signal_score === null || r.current_signal_score === undefined
+      ? null
+      : Number.isFinite(Number(r.current_signal_score))
+        ? Number(r.current_signal_score)
+        : null;
+  const last_refreshed_at =
+    r.last_refreshed_at === null || r.last_refreshed_at === undefined
+      ? null
+      : String(r.last_refreshed_at);
   const created_at =
     r.created_at != null ? String(r.created_at) : "";
   const ex = r.exit_price;
@@ -210,12 +222,15 @@ function normalizePositionFromApi(raw: unknown): PositionRow | null {
     status,
     platform,
     signal_score,
+    current_signal_score,
     ai_thesis,
+    last_refreshed_at,
     created_at,
   };
 }
 
 type PositionReport = {
+  id?: string;
   ticker: string;
   type: string;
   strike: number;
@@ -228,7 +243,12 @@ type PositionReport = {
     changed: boolean;
     reason: string;
   };
+  entryPrice?: number | null;
   currentPrice: number | null;
+  ai_thesis?: string | null;
+  signal_score?: number | null;
+  current_signal_score?: number | null;
+  score_reasoning?: string | null;
   checkInDates: {
     date: string;
     reason: string;
@@ -245,6 +265,13 @@ function formatMoney(n: number) {
 function formatPrice(n: number) {
   if (n === 0) return "—";
   return `$${n.toFixed(2)}`;
+}
+
+function scoreBadgeClass(score: number | null | undefined) {
+  if (score == null) return "bg-zinc-700/50 text-zinc-300";
+  if (score >= 80) return "bg-emerald-500/20 text-emerald-300";
+  if (score >= 60) return "bg-amber-500/20 text-amber-300";
+  return "bg-red-500/20 text-red-300";
 }
 
 export function PositionsClient() {
@@ -319,14 +346,32 @@ export function PositionsClient() {
       const data = (await res.json()) as {
         report?: PositionReport[];
         priceUpdates?: { id: string; current_price: number | null }[];
+        positionUpdates?: { id: string; current_signal_score: number; score_reasoning?: string }[];
         error?: string;
       };
       if (!res.ok || !data.report) throw new Error(data.error ?? "Report failed");
+      const positionUpdates = data.positionUpdates ?? [];
       const enrichedReport = data.report.map((item: PositionReport) => {
         const match = openPositions.find(
           (p) => p.ticker === item.ticker && p.strike === item.strike
         );
-        return { ...item, currentPrice: match?.current_price ?? null };
+        const livePriceMatch = match
+          ? (data.priceUpdates ?? []).find((u) => u.id === match.id)
+          : undefined;
+        const scoreMatch = match
+          ? positionUpdates.find((u) => u.id === match.id)
+          : undefined;
+        return {
+          ...item,
+          id: match?.id,
+          entryPrice: match?.entry_price ?? null,
+          currentPrice: livePriceMatch?.current_price ?? match?.current_price ?? null,
+          ai_thesis: match?.ai_thesis ?? null,
+          signal_score: match?.signal_score ?? null,
+          current_signal_score:
+            scoreMatch?.current_signal_score ?? match?.current_signal_score ?? null,
+          score_reasoning: scoreMatch?.score_reasoning ?? null,
+        };
       });
       setReport(enrichedReport);
 
@@ -344,14 +389,47 @@ export function PositionsClient() {
           )
       );
 
+      const refreshedAtIso = new Date().toISOString();
+      await Promise.all(
+        positionUpdates
+          .filter((u) => Number.isFinite(Number(u.current_signal_score)))
+          .map((u) =>
+            fetch("/api/positions", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                id: u.id,
+                current_signal_score: Number(u.current_signal_score),
+                last_refreshed_at: refreshedAtIso,
+              }),
+            }),
+          ),
+      );
+
       setPositions((prev) =>
         prev.map((pos) => {
           const match = priceUpdates.find((p) => p.id === pos.id);
+          const scoreMatch = positionUpdates.find((u) => u.id === pos.id);
+          if (match && match.current_price !== null && scoreMatch) {
+            return {
+              ...pos,
+              current_price: match.current_price,
+              current_signal_score: Number(scoreMatch.current_signal_score),
+              last_refreshed_at: refreshedAtIso,
+            };
+          }
           if (match && match.current_price !== null) {
             return { ...pos, current_price: match.current_price };
           }
+          if (scoreMatch) {
+            return {
+              ...pos,
+              current_signal_score: Number(scoreMatch.current_signal_score),
+              last_refreshed_at: refreshedAtIso,
+            };
+          }
           return pos;
-        })
+        }),
       );
     } catch (e) {
       setReportError(
@@ -501,90 +579,102 @@ export function PositionsClient() {
               {!reportLoading && report.length > 0 && (
                 <div className="grid gap-4 sm:grid-cols-2">
                   {report.map((item, i) => (
-                    <div
-                      key={i}
-                      className={`rounded-xl border p-4 ${
-                        item.recommendation === "Sell Now"
-                          ? "border-red-500/30 bg-red-950/20"
-                          : item.recommendation === "Consider Selling"
-                            ? "border-amber-500/30 bg-amber-950/20"
-                            : "border-zinc-700/60 bg-zinc-950/40"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-white">{item.ticker}</span>
-                          <span className="text-xs text-zinc-400">
-                            {item.type} ${item.strike}
-                          </span>
-                        </div>
-                        <span
-                          className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                            item.recommendation === "Sell Now"
-                              ? "bg-red-500/20 text-red-300"
-                              : item.recommendation === "Consider Selling"
-                                ? "bg-amber-500/20 text-amber-300"
-                                : "bg-emerald-500/20 text-emerald-300"
-                          }`}
-                        >
-                          {item.recommendation}
-                        </span>
-                      </div>
-                      <p className="text-sm text-zinc-300 leading-relaxed mb-3">
-                        {item.summary}
-                      </p>
-                      <div className="space-y-3">
-                        <div>
-                          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">
-                            Exit Target
-                          </p>
-                          <div className="flex items-center gap-3 mb-1">
-                            <p className="text-xs text-zinc-500">
-                              Current: <span className="text-white font-semibold">
-                                {item.currentPrice ? `$${item.currentPrice}/share` : "—"}
+                    (() => {
+                      const entry = item.entryPrice ?? null;
+                      const current = item.currentPrice ?? null;
+                      const deltaPct =
+                        entry != null &&
+                        current != null &&
+                        Number.isFinite(entry) &&
+                        Number.isFinite(current) &&
+                        entry > 0
+                          ? ((current - entry) / entry) * 100
+                          : null;
+                      const deltaClass =
+                        deltaPct == null
+                          ? "text-zinc-400"
+                          : deltaPct >= 0
+                            ? "text-emerald-400"
+                            : "text-red-400";
+                      const baseScore = item.signal_score ?? null;
+                      const currentScore = item.current_signal_score ?? null;
+                      const arrowClass =
+                        baseScore != null && currentScore != null
+                          ? currentScore > baseScore
+                            ? "text-emerald-400"
+                            : currentScore < baseScore
+                              ? "text-red-400"
+                              : "text-zinc-500"
+                          : "text-zinc-500";
+
+                      return (
+                        <div key={i} className="rounded-xl border border-zinc-700/60 bg-zinc-950/40 p-4">
+                          <div className="mb-3 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-white">{item.ticker}</span>
+                              <span className="text-xs text-zinc-400">
+                                {item.type} ${item.strike}
                               </span>
-                            </p>
-                            <span className="text-zinc-700">→</span>
-                            <p className="text-xs text-zinc-500">
-                              Target: <span className="font-semibold text-emerald-300">
-                                {item.exitTarget.currentTarget}
-                              </span>
-                            </p>
-                          </div>
-                          {item.exitTarget.changed ? (
-                            <div className="space-y-0.5">
-                              <p className="text-xs text-zinc-500 line-through">{item.exitTarget.previousTarget}</p>
-                              <p className="text-xs text-zinc-500 mt-1 italic">{item.exitTarget.reason}</p>
                             </div>
-                          ) : (
-                            <p className="text-xs text-zinc-500 italic">{item.exitTarget.reason}</p>
-                          )}
-                        </div>
-                        <div>
-                          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1">
-                            Check-in Dates
-                          </p>
-                          <div className="space-y-1.5">
-                            {item.checkInDates.map((d, j) => (
-                              <div key={j} className="flex gap-2">
-                                <span className={`text-xs font-semibold shrink-0 ${d.reason.includes("MUST EXIT") ? "text-red-400" : "text-zinc-400"}`}>
-                                  {d.date}
+                            <span
+                              className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                item.recommendation === "Sell Now"
+                                  ? "bg-red-500/20 text-red-300"
+                                  : item.recommendation === "Consider Selling"
+                                    ? "bg-amber-500/20 text-amber-300"
+                                    : "bg-emerald-500/20 text-emerald-300"
+                              }`}
+                            >
+                              {item.recommendation}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-3">
+                            <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/60 p-3">
+                              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                                Original Thesis
+                              </p>
+                              <p className="mb-3 text-sm leading-relaxed text-zinc-300">
+                                {item.ai_thesis ?? "No thesis recorded."}
+                              </p>
+                              <span
+                                className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${scoreBadgeClass(item.signal_score)}`}
+                              >
+                                Signal {item.signal_score ?? "—"}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center justify-center px-1">
+                              <span className={`text-lg font-bold ${arrowClass}`}>→</span>
+                            </div>
+
+                            <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/60 p-3">
+                              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                                Today&apos;s View
+                              </p>
+                              <p className={`mb-3 text-sm font-medium ${deltaClass}`}>
+                                {entry != null ? `$${entry.toFixed(2)}` : "—"}{" "}
+                                <span className="text-zinc-500">→</span>{" "}
+                                {current != null ? `$${current.toFixed(2)}` : "—"}{" "}
+                                <span className={deltaClass}>
+                                  ({deltaPct != null ? `${deltaPct >= 0 ? "+" : ""}${deltaPct.toFixed(1)}%` : "—"})
                                 </span>
-                                <span className="text-xs text-zinc-500 leading-relaxed">{d.reason}</span>
+                              </p>
+                              <div className="mb-2">
+                                <span
+                                  className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${scoreBadgeClass(item.current_signal_score)}`}
+                                >
+                                  Current Score {item.current_signal_score ?? "—"}
+                                </span>
                               </div>
-                            ))}
+                              <p className="text-sm leading-relaxed text-zinc-400">
+                                {item.score_reasoning ?? "No score reasoning returned."}
+                              </p>
+                            </div>
                           </div>
                         </div>
-                        {item.redFlags !== "None" && (
-                          <div>
-                            <p className="text-xs font-semibold uppercase tracking-wider text-amber-500 mb-0.5">
-                              ⚠ Red Flags
-                            </p>
-                            <p className="text-xs text-zinc-400">{item.redFlags}</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                      );
+                    })()
                   ))}
                 </div>
               )}

@@ -63,19 +63,36 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { id, exit_price, quantity_sold, closed_at, current_price } = body as {
+  const { id, exit_price, quantity_sold, closed_at, current_price, current_signal_score, last_refreshed_at } = body as {
     id: string;
     exit_price?: number;
     quantity_sold?: number;
     closed_at?: string;
     current_price?: number;
+    current_signal_score?: number;
+    last_refreshed_at?: string;
   };
 
-  // Price-only update (from daily refresh)
-  if (current_price !== undefined && exit_price === undefined) {
+  const hasRefreshUpdate =
+    current_price !== undefined ||
+    current_signal_score !== undefined ||
+    last_refreshed_at !== undefined;
+
+  // Daily refresh update (price and/or current signal metadata)
+  if (hasRefreshUpdate && exit_price === undefined) {
+    const updatePayload: {
+      current_price?: number;
+      current_signal_score?: number;
+      last_refreshed_at?: string;
+    } = {};
+
+    if (current_price !== undefined) updatePayload.current_price = current_price;
+    if (current_signal_score !== undefined) updatePayload.current_signal_score = current_signal_score;
+    if (last_refreshed_at !== undefined) updatePayload.last_refreshed_at = last_refreshed_at;
+
     const { data, error } = await supabase
       .from('positions')
-      .update({ current_price })
+      .update(updatePayload)
       .eq('id', id)
       .select()
       .single();

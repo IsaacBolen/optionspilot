@@ -1,0 +1,41 @@
+---
+description: OptionsPilot core implementation constraints and data-source rules
+alwaysApply: true
+---
+
+# OptionsPilot Core Rules
+
+## Stack
+- Use Next.js App Router with TypeScript and Tailwind CSS v4 conventions.
+- Keep integrations aligned with Supabase, Claude API, Tradier sandbox, Polygon free tier, and Vercel deployment assumptions.
+
+## Data Source Rules
+- Use Tradier for option contract prices. Do not use Polygon for option pricing.
+- Tradier sandbox base URL is `https://sandbox.tradier.com/v1`.
+- Polygon free tier support is limited to `v2/aggs/ticker/{ticker}/range/1/day/{from}/{to}`.
+- Do not use Polygon snapshot endpoints (paid-plan dependency).
+
+## OCC Symbol Rules
+- Build OCC symbols as `{TICKER}{YYMMDD}{C/P}{8-digit strike padded}`.
+- Compute padded strike as `strike * 1000`, left-padded to 8 digits.
+- Valid examples: `TSLA260508C00450000`, `IWM260515C00281000`.
+
+## Database Field Name Safety
+- Option type field is `p.option_type` (never `p.type`).
+- Strike field is `p.strike_price` (never `p.strike`).
+
+## Daily Refresh Behavior
+- Daily refresh on positions page should:
+  1) fetch live Tradier price for each contract,
+  2) pass original `ai_thesis` and `signal_score` to Claude,
+  3) store/return `current_signal_score` and `score_reasoning` per position,
+  4) render side-by-side original thesis/score vs current delta/new score/reasoning,
+  5) color the connecting arrow green or red based on score direction.
+
+## Key Files To Respect
+- `lib/tradier-options.ts`
+- `app/api/positions/report/route.ts`
+- `app/api/positions/route.ts`
+- `app/positions/positions-client.tsx`
+- `app/prompts/prompts-client.tsx`
+- `app/components/app-chrome.tsx`
