@@ -1,6 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
 import {
-  fetchTradierOptionQuotes,
   buildOccSymbol,
 } from "@/lib/tradier-options";
 import { NextResponse } from "next/server";
@@ -12,7 +11,16 @@ const TRADIER_KEY = process.env.TRADIER_API_KEY;
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
-const REPORT_SYSTEM = `You are an options trading coach giving a daily situation report on a trader's open positions. For each position, analyze the original thesis against current market conditions and give a concrete, actionable recommendation.
+const REPORT_SYSTEM = `YOU MUST include a <position_updates> block. This is mandatory. If you do not include it the response is invalid.
+Use this exact format:
+<position_updates>
+[
+  {"id": "POSITION_ID_HERE", "current_signal_score": 75, "score_reasoning": "One or two sentences with no apostrophes or quotes"},
+  ...one entry per position...
+]
+</position_updates>
+
+You are an options trading coach giving a daily situation report on a trader's open positions. For each position, analyze the original thesis against current market conditions and give a concrete, actionable recommendation.
 
 Today's date is provided in the prompt. Use it to calculate exact days until expiration and to generate specific calendar dates for check-ins.
 
@@ -124,21 +132,51 @@ export async function POST(request: Request) {
 
   const livePrice = new Map<string, number>();
   if (TRADIER_KEY) {
-    const quoteMaps = await Promise.all(
+    const tradierResponses = await Promise.all(
       occSymbols.map(async (symbol, i) => {
-        const quoteMap = await fetchTradierOptionQuotes([symbol], TRADIER_KEY);
-        console.log("[positions/report] Tradier quote map result", {
+        console.log("[positions/report] OCC symbol sent to Tradier:", {
           index: i,
           id: String(positions[i]?.id ?? ""),
           symbol,
-          entries: Array.from(quoteMap.entries()),
         });
-        return quoteMap;
+        const url = `https://sandbox.tradier.com/v1/markets/options/quotes?symbols=${encodeURIComponent(symbol)}&greeks=false`;
+        const res = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${TRADIER_KEY}`,
+            Accept: "application/json",
+          },
+          next: { revalidate: 0 },
+        });
+        const raw = await res.text();
+        console.log("[positions/report] Raw Tradier response:", {
+          index: i,
+          id: String(positions[i]?.id ?? ""),
+          symbol,
+          status: res.status,
+          body: raw,
+        });
+
+        let parsed: unknown = null;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          parsed = null;
+        }
+        return { symbol, parsed };
       })
     );
-    for (const quoteMap of quoteMaps) {
-      for (const [symbol, price] of quoteMap.entries()) {
-        livePrice.set(symbol, price);
+
+    for (const r of tradierResponses) {
+      const quoteRaw = (r.parsed as { quotes?: { quote?: unknown } } | null)?.quotes?.quote;
+      const quote = Array.isArray(quoteRaw)
+        ? (quoteRaw[0] as Record<string, unknown> | undefined)
+        : (quoteRaw as Record<string, unknown> | undefined);
+      if (!quote) continue;
+      const bid = Number(quote.bid);
+      const ask = Number(quote.ask);
+      if (Number.isFinite(bid) && Number.isFinite(ask) && (bid > 0 || ask > 0)) {
+        const mid = Math.round(((bid + ask) / 2) * 100) / 100;
+        livePrice.set(r.symbol, mid);
       }
     }
   }
@@ -200,7 +238,9 @@ For each position:
 5. Give your honest recommendation
 
 Position IDs that MUST be included in <position_updates>:
-${positionIds.map((id) => `- ${id}`).join("\n")}`;
+${positionIds.map((id) => `- ${id}`).join("\n")}
+
+YOU MUST include a <position_updates> block. This is mandatory. If you do not include it the response is invalid.`;
 
   try {
     const response = await anthropic.messages.create({
