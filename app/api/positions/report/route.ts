@@ -5,6 +5,9 @@ import {
 } from "@/lib/tradier-options";
 import { NextResponse } from "next/server";
 
+export const maxDuration = 60;
+export const dynamic = "force-dynamic";
+
 const TRADIER_KEY = process.env.TRADIER_API_KEY;
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
@@ -100,9 +103,17 @@ export async function POST(request: Request) {
     )
   );
 
-  const livePrice = TRADIER_KEY
-    ? await fetchTradierOptionQuotes(occSymbols, TRADIER_KEY)
-    : new Map<string, number>();
+  const livePrice = new Map<string, number>();
+  if (TRADIER_KEY) {
+    const quoteMaps = await Promise.all(
+      occSymbols.map((symbol) => fetchTradierOptionQuotes([symbol], TRADIER_KEY))
+    );
+    for (const quoteMap of quoteMaps) {
+      for (const [symbol, price] of quoteMap.entries()) {
+        livePrice.set(symbol, price);
+      }
+    }
+  }
 
   const prompt = `Today is ${today}.
 
