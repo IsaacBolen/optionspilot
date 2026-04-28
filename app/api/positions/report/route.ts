@@ -11,14 +11,15 @@ const TRADIER_KEY = process.env.TRADIER_API_KEY;
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
-const REPORT_SYSTEM = `YOU MUST include a <position_updates> block. This is mandatory. If you do not include it the response is invalid.
-Use this exact format:
-<position_updates>
-[
-  {"id": "POSITION_ID_HERE", "current_signal_score": 75, "score_reasoning": "One or two sentences with no apostrophes or quotes"},
-  ...one entry per position...
-]
-</position_updates>
+const REPORT_SYSTEM = `Return your ENTIRE response as one valid JSON object with exactly two keys:
+{
+  "report": [/* existing report array */],
+  "positionUpdates": [
+    { "id": "POSITION_ID_HERE", "current_signal_score": 75, "score_reasoning": "One or two sentences with no apostrophes or quotes" }
+  ]
+}
+
+No markdown, no code fences, no commentary outside this JSON object.
 
 You are an options trading coach giving a daily situation report on a trader's open positions. For each position, analyze the original thesis against current market conditions and give a concrete, actionable recommendation.
 
@@ -46,7 +47,7 @@ CRITICAL RULES FOR CHECK-IN DATES:
 - The other 2 dates should be tied to real upcoming events: Fed meetings, earnings, economic data releases, or key technical levels. If no known events, use logical time-based checkpoints.
 - Never use vague language like "next week" or "soon". Always use specific dates.
 
-Return ONLY a JSON array where each item has exactly this shape:
+The "report" array must use items with exactly this shape:
 {
   "ticker": "NVDA",
   "type": "Call",
@@ -68,17 +69,7 @@ Return ONLY a JSON array where each item has exactly this shape:
   "redFlags": "Any new risks that were not present when the trade was entered. If none say None."
 }
 
-No markdown, no commentary outside the JSON array.
----
-REQUIRED: You MUST end your entire response with this exact block. No exceptions. Do not skip this even if data is incomplete. Use empty string for unknown values but always include every position id listed below:
-
-<position_updates>
-[
-  {"id": "POSITION_ID_HERE", "current_signal_score": 75, "score_reasoning": "One or two sentences with no apostrophes or quotes"},
-  ...one entry per position...
-]
-</position_updates>
----`;
+Your "positionUpdates" array must include every position id provided in the prompt, one entry per id.`;
 
 export async function POST(request: Request) {
   let body: unknown;
@@ -104,17 +95,26 @@ export async function POST(request: Request) {
   });
 
   // Build OCC symbols and fetch live option premiums from Tradier
-  const occSymbols = positions.map((p, i) => {
-    const optionType = String(p.type ?? "");
-    const strikePrice = p.strike;
-    console.log("[positions/report] Position field check", {
-      index: i,
+  const debugSymbols = positions.map((p) => {
+    const occSymbol = buildOccSymbol(
+      String(p.ticker ?? ""),
+      String(p.expiration ?? ""),
+      (p.type as "Call" | "Put") ?? "Call",
+      Number(p.strike),
+    );
+    return {
       id: String(p.id ?? ""),
       ticker: String(p.ticker ?? ""),
-      type: optionType,
-      strike: strikePrice,
+      strike: Number(p.strike),
+      type: String(p.type ?? ""),
       expiration: String(p.expiration ?? ""),
-    });
+      occSymbol,
+    };
+  });
+
+  const occSymbols = positions.map((p) => {
+    const optionType = String(p.type ?? "");
+    const strikePrice = p.strike;
 
     const occSymbol = buildOccSymbol(
       String(p.ticker ?? ""),
@@ -122,23 +122,13 @@ export async function POST(request: Request) {
       (p.type as "Call" | "Put") ?? "Call",
       Number(p.strike),
     );
-    console.log("[positions/report] Built OCC symbol", {
-      index: i,
-      id: String(p.id ?? ""),
-      symbol: occSymbol,
-    });
     return occSymbol;
   });
 
   const livePrice = new Map<string, number>();
   if (TRADIER_KEY) {
     const tradierResponses = await Promise.all(
-      occSymbols.map(async (symbol, i) => {
-        console.log("[positions/report] OCC symbol sent to Tradier:", {
-          index: i,
-          id: String(positions[i]?.id ?? ""),
-          symbol,
-        });
+      occSymbols.map(async (symbol) => {
         const url = `https://sandbox.tradier.com/v1/markets/options/quotes?symbols=${encodeURIComponent(symbol)}&greeks=false`;
         const res = await fetch(url, {
           headers: {
@@ -148,13 +138,6 @@ export async function POST(request: Request) {
           next: { revalidate: 0 },
         });
         const raw = await res.text();
-        console.log("[positions/report] Raw Tradier response:", {
-          index: i,
-          id: String(positions[i]?.id ?? ""),
-          symbol,
-          status: res.status,
-          body: raw,
-        });
 
         let parsed: unknown = null;
         try {
@@ -240,7 +223,7 @@ For each position:
 Position IDs that MUST be included in <position_updates>:
 ${positionIds.map((id) => `- ${id}`).join("\n")}
 
-YOU MUST include a <position_updates> block. This is mandatory. If you do not include it the response is invalid.`;
+YOU MUST return one JSON object with keys "report" and "positionUpdates". This is mandatory. If you do not include both keys the response is invalid.`;
 
   try {
     const response = await anthropic.messages.create({
@@ -254,46 +237,20 @@ YOU MUST include a <position_updates> block. This is mandatory. If you do not in
       .filter((b) => b.type === "text")
       .map((b) => b.text)
       .join("");
-    console.log("[positions/report] Raw Claude response text:", text);
 
     const trimmed = text.trim();
-    const positionUpdatesRegex = /<position_updates>([\s\S]*?)<\/position_updates>/i;
-    console.log(
-      "[positions/report] position_updates extraction regex:",
-      positionUpdatesRegex.toString()
-    );
-    const positionUpdatesMatch = trimmed.match(
-      positionUpdatesRegex
-    );
-    let positionUpdates: Array<{
-      id: string;
-      current_signal_score: number;
-      score_reasoning?: string;
-    }> = [];
-    if (positionUpdatesMatch) {
-      const rawPositionUpdates = positionUpdatesMatch[1].trim();
-      // Normalize single-quoted values to double-quoted JSON strings.
-      const sanitizedPositionUpdates = rawPositionUpdates.replace(
-        /'([^'\\]*(?:\\.[^'\\]*)*)'/g,
-        (_, value: string) => `"${value.replace(/"/g, '\\"')}"`
-      );
-      try {
-        positionUpdates = JSON.parse(sanitizedPositionUpdates);
-      } catch {
-        console.error("Failed to parse <position_updates> block:", rawPositionUpdates);
-        positionUpdates = [];
-      }
-    }
-
-    const reportCandidate = positionUpdatesMatch
-      ? trimmed.replace(positionUpdatesMatch[0], "").trim()
-      : trimmed;
-    const fence = reportCandidate.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    const candidate = fence ? fence[1].trim() : reportCandidate;
-    const start = candidate.indexOf("[");
-    const end = candidate.lastIndexOf("]");
-    if (start === -1 || end === -1) throw new Error("No JSON array in response");
-    const report = JSON.parse(candidate.slice(start, end + 1));
+    const parsed = JSON.parse(trimmed) as {
+      report?: unknown[];
+      positionUpdates?: Array<{
+        id: string;
+        current_signal_score: number;
+        score_reasoning?: string;
+      }>;
+    };
+    const report = Array.isArray(parsed.report) ? parsed.report : [];
+    const positionUpdates = Array.isArray(parsed.positionUpdates)
+      ? parsed.positionUpdates
+      : [];
 
     const pricesOut = positions.map((p, i) => {
       const occSymbol = occSymbols[i];
@@ -311,7 +268,13 @@ YOU MUST include a <position_updates> block. This is mandatory. If you do not in
       }))
       .filter((u) => u.current_price !== null);
 
-    return NextResponse.json({ report, prices: pricesOut, priceUpdates, positionUpdates });
+    return NextResponse.json({
+      report,
+      prices: pricesOut,
+      priceUpdates,
+      positionUpdates,
+      debugSymbols,
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Report failed";
     return NextResponse.json({ error: msg }, { status: 502 });
