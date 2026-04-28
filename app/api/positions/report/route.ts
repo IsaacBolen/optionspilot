@@ -61,14 +61,16 @@ Return ONLY a JSON array where each item has exactly this shape:
 }
 
 No markdown, no commentary outside the JSON array.
+---
+REQUIRED: You MUST end your entire response with this exact block. No exceptions. Do not skip this even if data is incomplete. Use empty string for unknown values but always include every position id listed below:
 
-At the very end of your response, append this exact tag-wrapped JSON block:
 <position_updates>
-[{"id": "...", "current_signal_score": 74, "score_reasoning": "...1-2 sentences..."}]
+[
+  {"id": "POSITION_ID_HERE", "current_signal_score": 75, "score_reasoning": "One or two sentences with no apostrophes or quotes"},
+  ...one entry per position...
+]
 </position_updates>
-
-The "id" must match each position id provided in the prompt.
-In score_reasoning, never use apostrophes or quotation marks. Use plain text only.`;
+---`;
 
 export async function POST(request: Request) {
   let body: unknown;
@@ -94,19 +96,45 @@ export async function POST(request: Request) {
   });
 
   // Build OCC symbols and fetch live option premiums from Tradier
-  const occSymbols = positions.map((p) =>
-    buildOccSymbol(
+  const occSymbols = positions.map((p, i) => {
+    const optionType = String(p.option_type ?? "");
+    const strikePrice = p.strike_price;
+    console.log("[positions/report] Position field check", {
+      index: i,
+      id: String(p.id ?? ""),
+      ticker: String(p.ticker ?? ""),
+      option_type: optionType,
+      strike_price: strikePrice,
+      expiration: String(p.expiration ?? ""),
+    });
+
+    const occSymbol = buildOccSymbol(
       String(p.ticker ?? ""),
       String(p.expiration ?? ""),
       (p.option_type as "Call" | "Put") ?? "Call",
       Number(p.strike_price),
-    )
-  );
+    );
+    console.log("[positions/report] Built OCC symbol", {
+      index: i,
+      id: String(p.id ?? ""),
+      symbol: occSymbol,
+    });
+    return occSymbol;
+  });
 
   const livePrice = new Map<string, number>();
   if (TRADIER_KEY) {
     const quoteMaps = await Promise.all(
-      occSymbols.map((symbol) => fetchTradierOptionQuotes([symbol], TRADIER_KEY))
+      occSymbols.map(async (symbol, i) => {
+        const quoteMap = await fetchTradierOptionQuotes([symbol], TRADIER_KEY);
+        console.log("[positions/report] Tradier quote map result", {
+          index: i,
+          id: String(positions[i]?.id ?? ""),
+          symbol,
+          entries: Array.from(quoteMap.entries()),
+        });
+        return quoteMap;
+      })
     );
     for (const quoteMap of quoteMaps) {
       for (const [symbol, price] of quoteMap.entries()) {
@@ -114,6 +142,8 @@ export async function POST(request: Request) {
       }
     }
   }
+
+  const positionIds = positions.map((p) => String(p.id ?? "")).filter(Boolean);
 
   const prompt = `Today is ${today}.
 
@@ -167,7 +197,10 @@ For each position:
 2. Use the live Tradier option premium to assess current P&L and whether the trader should act now
 3. If no live price is available, reason from time remaining, thesis strength, and signal score
 4. Provide 3 specific check-in dates anchored to real calendar events or expiry math
-5. Give your honest recommendation`;
+5. Give your honest recommendation
+
+Position IDs that MUST be included in <position_updates>:
+${positionIds.map((id) => `- ${id}`).join("\n")}`;
 
   try {
     const response = await anthropic.messages.create({
