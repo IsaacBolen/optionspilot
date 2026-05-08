@@ -348,6 +348,94 @@ function scoreBadgeClass(score: number | null | undefined) {
   return "bg-red-500/20 text-red-300";
 }
 
+/** Display-only: split prose into sentences for bullets/lists. */
+function splitIntoSentences(text: string): string[] {
+  const t = text.trim();
+  if (!t) return [];
+  const parts = t.split(/(?<=[.!?])\s+/);
+  return parts.map((s) => s.trim()).filter(Boolean);
+}
+
+function thesisUpdateBullets(text: string): string[] {
+  const t = text.trim();
+  if (!t) return [];
+  let parts = splitIntoSentences(t);
+  if (parts.length <= 1 && t.includes(";")) {
+    parts = t.split(";").map((s) => s.trim()).filter(Boolean);
+  }
+  if (parts.length === 0) return [t];
+  return parts.slice(0, 4);
+}
+
+function exitPriceDetailBullets(updatedTarget: string): string[] {
+  const t = updatedTarget.trim();
+  if (!t) return [];
+  const sents = splitIntoSentences(t);
+  let bullets = sents.slice(1, 4);
+  if (bullets.length === 0 && t.includes(";")) {
+    bullets = t.split(";").map((s) => s.trim()).filter(Boolean).slice(0, 3);
+    const head = sents[0] ?? t;
+    bullets = bullets.filter((b) => b !== head);
+  }
+  return bullets.slice(0, 3);
+}
+
+function premiumTechnicalStopLines(updatedStop: string): {
+  premium: string;
+  technical: string;
+} {
+  const t = updatedStop.trim();
+  if (!t) return { premium: "—", technical: "—" };
+  const lines = t.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+  if (lines.length >= 2) {
+    const prem = lines.find((l) => /\$[\d.]/.test(l)) ?? lines[0];
+    const tech = lines.find((l) => l !== prem) ?? lines[1];
+    return { premium: prem, technical: tech };
+  }
+  const sents = splitIntoSentences(t);
+  const dollarSents = sents.filter((s) => /\$[\d.]/.test(s));
+  const otherSents = sents.filter((s) => !dollarSents.includes(s));
+  if (dollarSents.length && otherSents.length) {
+    return { premium: dollarSents.join(" "), technical: otherSents.join(" ") };
+  }
+  if (/\$[\d.]/.test(t)) {
+    return { premium: t, technical: "—" };
+  }
+  return { premium: "—", technical: t };
+}
+
+function timeRemainingBullets(note: string): string[] {
+  const t = note.trim();
+  if (!t) return [];
+  let parts = splitIntoSentences(t);
+  if (parts.length <= 1 && t.includes(";")) {
+    parts = t.split(";").map((s) => s.trim()).filter(Boolean);
+  }
+  if (parts.length === 0) return [t];
+  return parts.slice(0, 3);
+}
+
+function watchForNumberedItems(text: string): string[] {
+  const t = text.trim();
+  if (!t) return [];
+  let parts = splitIntoSentences(t);
+  if (parts.length <= 1 && t.includes(";")) {
+    parts = t.split(";").map((s) => s.trim()).filter(Boolean);
+  }
+  if (parts.length === 0) return [t];
+  return parts.slice(0, 2);
+}
+
+function truncateReasoningParagraph(text: string, maxSentences: number): string {
+  const t = text.trim();
+  if (!t) return "";
+  const sents = splitIntoSentences(t);
+  if (sents.length === 0) return t;
+  if (sents.length <= maxSentences) return sents.join(" ");
+  const cut = sents.slice(0, maxSentences).join(" ");
+  return cut.endsWith(".") ? `${cut} …` : `${cut}. …`;
+}
+
 export function PositionsClient() {
   const [filter, setFilter] = useState<PositionFilter>("all");
   const [positions, setPositions] = useState<PositionRow[]>([]);
@@ -729,6 +817,12 @@ export function PositionsClient() {
                         : pct >= 0
                           ? "text-emerald-400"
                           : "text-red-400";
+                    const exitBullets = exitPriceDetailBullets(
+                      item.updated_target_exit,
+                    );
+                    const stopLines = premiumTechnicalStopLines(
+                      item.updated_stop_loss,
+                    );
 
                     return (
                       <div
@@ -771,30 +865,35 @@ export function PositionsClient() {
                           <p className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
                             Premium
                           </p>
-                          <p className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-lg font-semibold tabular-nums tracking-tight text-white sm:text-xl">
-                            <span>
-                              Entry:{" "}
-                              <span className="text-zinc-100">
-                                {entry > 0 ? `$${entry.toFixed(2)}` : "—"}
+                          <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:gap-4">
+                            <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-lg font-semibold tabular-nums tracking-tight text-white sm:text-xl">
+                              <span>
+                                Entry:{" "}
+                                <span className="text-zinc-100">
+                                  {entry > 0 ? `$${entry.toFixed(2)}` : "—"}
+                                </span>
                               </span>
-                            </span>
-                            <span className="text-zinc-600">→</span>
-                            <span>
-                              Current:{" "}
-                              <span className="text-zinc-100">
-                                {current != null && Number.isFinite(current)
-                                  ? `$${current.toFixed(2)}`
-                                  : "—"}
+                              <span className="text-zinc-600">→</span>
+                              <span>
+                                Current:{" "}
+                                <span className="text-zinc-100">
+                                  {current != null && Number.isFinite(current)
+                                    ? `$${current.toFixed(2)}`
+                                    : "—"}
+                                </span>
                               </span>
-                            </span>
-                            <span className="text-zinc-600">→</span>
-                            <span className={pnlClass}>
-                              P&amp;L:{" "}
+                            </p>
+                            <div
+                              className={`text-2xl font-bold tabular-nums tracking-tight sm:text-3xl ${pnlClass}`}
+                            >
+                              <span className="mr-1.5 text-sm font-semibold uppercase tracking-wide text-zinc-500 sm:text-base">
+                                P&amp;L
+                              </span>
                               {pct != null && Number.isFinite(pct)
                                 ? `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`
                                 : "—"}
-                            </span>
-                          </p>
+                            </div>
+                          </div>
                         </div>
 
                         {/* Thesis vs update */}
@@ -840,12 +939,22 @@ export function PositionsClient() {
                                     : "bg-red-500/15 text-red-300 ring-1 ring-red-500/25"
                                 }`}
                               >
-                                {item.thesis_still_valid ? "Valid" : "Invalid"}
+                                {item.thesis_still_valid ? "VALID" : "INVALID"}
                               </span>
                             </div>
-                            <p className="text-sm leading-relaxed text-zinc-300">
-                              {item.thesis_update.trim() || "—"}
-                            </p>
+                            <ul className="mt-1 list-disc space-y-2 pl-4 text-sm leading-relaxed text-zinc-300">
+                              {(item.thesis_update.trim()
+                                ? thesisUpdateBullets(item.thesis_update)
+                                : []
+                              ).map((line, bi) => (
+                                <li key={bi}>{line}</li>
+                              ))}
+                              {!item.thesis_update.trim() && (
+                                <li className="list-none pl-0 text-zinc-500">
+                                  —
+                                </li>
+                              )}
+                            </ul>
                             {item.score_reasoning && (
                               <p className="mt-2 border-t border-zinc-800/80 pt-2 text-xs leading-relaxed text-zinc-500">
                                 Score note: {item.score_reasoning}
@@ -860,45 +969,93 @@ export function PositionsClient() {
                             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
                               Target exit
                             </p>
-                            <p className="text-sm leading-snug text-zinc-300">
-                              <span className="text-zinc-400">
-                                {item.original_target_exit || "—"}
+                            <div className="flex flex-wrap items-start gap-x-2 gap-y-1">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                                  Original
+                                </p>
+                                <p className="mt-0.5 text-xs leading-snug text-zinc-500">
+                                  {item.original_target_exit.trim() || "—"}
+                                </p>
+                              </div>
+                              <span className="shrink-0 pt-4 text-zinc-600">
+                                →
                               </span>
-                              <span className="mx-1 text-zinc-600">→</span>
-                              <span className="text-emerald-300/95">
-                                {item.updated_target_exit || "—"}
-                              </span>
-                            </p>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-500/80">
+                                  Updated
+                                </p>
+                                <p className="mt-0.5 text-sm font-bold leading-snug text-emerald-300">
+                                  {item.updated_target_exit.trim() || "—"}
+                                </p>
+                              </div>
+                            </div>
+                            {exitBullets.length > 0 && (
+                              <ul className="mt-3 list-disc space-y-1.5 border-t border-zinc-800/80 pt-3 pl-4 text-xs leading-snug text-zinc-400">
+                                {exitBullets.map((b, bi) => (
+                                  <li key={bi}>{b}</li>
+                                ))}
+                              </ul>
+                            )}
                           </div>
                           <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
                             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
                               Stop loss
                             </p>
-                            <p className="text-sm leading-snug text-zinc-300">
-                              <span className="text-zinc-400">
-                                {item.original_stop_loss || "—"}
-                              </span>
-                              <span className="mx-1 text-zinc-600">→</span>
-                              <span className="text-amber-200/90">
-                                {item.updated_stop_loss || "—"}
-                              </span>
-                            </p>
+                            <div className="space-y-3 text-sm leading-snug text-zinc-300">
+                              <p>
+                                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                                  PREMIUM STOP:
+                                </span>{" "}
+                                <span className="font-bold text-zinc-100">
+                                  {stopLines.premium}
+                                </span>
+                              </p>
+                              <p>
+                                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                                  TECHNICAL STOP:
+                                </span>{" "}
+                                <span className="font-bold text-zinc-100">
+                                  {stopLines.technical}
+                                </span>
+                              </p>
+                            </div>
                           </div>
                           <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
                             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
                               Time remaining
                             </p>
-                            <p className="text-sm leading-relaxed text-zinc-300">
-                              {item.time_remaining_note || "—"}
-                            </p>
+                            <ul className="list-disc space-y-2 pl-4 text-sm leading-relaxed text-zinc-300">
+                              {(item.time_remaining_note.trim()
+                                ? timeRemainingBullets(item.time_remaining_note)
+                                : []
+                              ).map((line, bi) => (
+                                <li key={bi}>{line}</li>
+                              ))}
+                              {!item.time_remaining_note.trim() && (
+                                <li className="list-none pl-0 text-zinc-500">
+                                  —
+                                </li>
+                              )}
+                            </ul>
                           </div>
                           <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
                             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
                               Watch for
                             </p>
-                            <p className="text-sm leading-relaxed text-zinc-300">
-                              {item.what_to_watch || "—"}
-                            </p>
+                            {item.what_to_watch.trim() ? (
+                              <ol className="list-decimal space-y-2 pl-5 text-sm leading-relaxed text-zinc-300 marker:text-zinc-500">
+                                {watchForNumberedItems(item.what_to_watch).map(
+                                  (line, wi) => (
+                                    <li key={wi} className="pl-1">
+                                      {line}
+                                    </li>
+                                  ),
+                                )}
+                              </ol>
+                            ) : (
+                              <p className="text-sm text-zinc-500">—</p>
+                            )}
                           </div>
                         </div>
 
@@ -908,7 +1065,9 @@ export function PositionsClient() {
                             Reasoning
                           </p>
                           <p className="mt-1.5 text-sm leading-relaxed text-zinc-200">
-                            {item.reasoning.trim() || "—"}
+                            {item.reasoning.trim()
+                              ? truncateReasoningParagraph(item.reasoning.trim(), 3)
+                              : "—"}
                           </p>
                         </div>
                       </div>
