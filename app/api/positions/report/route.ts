@@ -1,13 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
 import {
   buildOccSymbol,
+  fetchTradierOptionQuotes,
 } from "@/lib/tradier-options";
 import { NextResponse } from "next/server";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
-
-const TRADIER_KEY = process.env.TRADIER_API_KEY;
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
@@ -111,43 +110,12 @@ export async function POST(request: Request) {
     return occSymbol;
   });
 
-  const livePrice = new Map<string, number>();
-  if (TRADIER_KEY) {
-    const tradierResponses = await Promise.all(
-      occSymbols.map(async (symbol) => {
-        const url = `https://sandbox.tradier.com/v1/markets/options/quotes?symbols=${encodeURIComponent(symbol)}&greeks=false`;
-        const res = await fetch(url, {
-          headers: {
-            Authorization: `Bearer ${TRADIER_KEY}`,
-            Accept: "application/json",
-          },
-          next: { revalidate: 0 },
-        });
-        const raw = await res.text();
-
-        let parsed: unknown = null;
-        try {
-          parsed = JSON.parse(raw);
-        } catch {
-          parsed = null;
-        }
-        return { symbol, parsed };
-      })
+  let livePrice = new Map<string, number>();
+  if (process.env.TRADIER_API_KEY) {
+    livePrice = await fetchTradierOptionQuotes(
+      occSymbols,
+      process.env.TRADIER_API_KEY,
     );
-
-    for (const r of tradierResponses) {
-      const quoteRaw = (r.parsed as { quotes?: { quote?: unknown } } | null)?.quotes?.quote;
-      const quote = Array.isArray(quoteRaw)
-        ? (quoteRaw[0] as Record<string, unknown> | undefined)
-        : (quoteRaw as Record<string, unknown> | undefined);
-      if (!quote) continue;
-      const bid = Number(quote.bid);
-      const ask = Number(quote.ask);
-      if (Number.isFinite(bid) && Number.isFinite(ask) && (bid > 0 || ask > 0)) {
-        const mid = Math.round(((bid + ask) / 2) * 100) / 100;
-        livePrice.set(r.symbol, mid);
-      }
-    }
   }
 
   const reportDateIso = new Date().toISOString().split("T")[0];
