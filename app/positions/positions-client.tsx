@@ -367,19 +367,6 @@ function thesisUpdateBullets(text: string): string[] {
   return parts.slice(0, 4);
 }
 
-function exitPriceDetailBullets(updatedTarget: string): string[] {
-  const t = updatedTarget.trim();
-  if (!t) return [];
-  const sents = splitIntoSentences(t);
-  let bullets = sents.slice(1, 4);
-  if (bullets.length === 0 && t.includes(";")) {
-    bullets = t.split(";").map((s) => s.trim()).filter(Boolean).slice(0, 3);
-    const head = sents[0] ?? t;
-    bullets = bullets.filter((b) => b !== head);
-  }
-  return bullets.slice(0, 3);
-}
-
 function premiumTechnicalStopLines(updatedStop: string): {
   premium: string;
   technical: string;
@@ -426,16 +413,6 @@ function watchForNumberedItems(text: string): string[] {
   return parts.slice(0, 2);
 }
 
-function truncateReasoningParagraph(text: string, maxSentences: number): string {
-  const t = text.trim();
-  if (!t) return "";
-  const sents = splitIntoSentences(t);
-  if (sents.length === 0) return t;
-  if (sents.length <= maxSentences) return sents.join(" ");
-  const cut = sents.slice(0, maxSentences).join(" ");
-  return cut.endsWith(".") ? `${cut} …` : `${cut}. …`;
-}
-
 export function PositionsClient() {
   const [filter, setFilter] = useState<PositionFilter>("all");
   const [positions, setPositions] = useState<PositionRow[]>([]);
@@ -444,6 +421,9 @@ export function PositionsClient() {
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportVisible, setReportVisible] = useState(false);
+  const [expandedReasoningKey, setExpandedReasoningKey] = useState<
+    string | null
+  >(null);
   const [closeModal, setCloseModal] = useState<CloseModalState>(null);
 
   useEffect(() => {
@@ -795,7 +775,7 @@ export function PositionsClient() {
                 ×
               </button>
             </div>
-            <div className="p-5">
+            <div className="p-3">
               {reportLoading && (
                 <div className="flex items-center gap-3 text-sm text-emerald-300 py-4">
                   <div className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-500/30 border-t-emerald-400" />
@@ -806,7 +786,7 @@ export function PositionsClient() {
                 <p className="text-sm text-red-400 py-4">{reportError}</p>
               )}
               {!reportLoading && report.length > 0 && (
-                <div className="grid gap-5 sm:grid-cols-2">
+                <div className="grid w-full grid-cols-1 gap-3">
                   {report.map((item, i) => {
                     const entry = item.entry_price;
                     const current = item.current_price;
@@ -817,20 +797,23 @@ export function PositionsClient() {
                         : pct >= 0
                           ? "text-emerald-400"
                           : "text-red-400";
-                    const exitBullets = exitPriceDetailBullets(
-                      item.updated_target_exit,
-                    );
                     const stopLines = premiumTechnicalStopLines(
                       item.updated_stop_loss,
                     );
+                    const cardKey = `${item.id ?? item.ticker}-${item.strike}-${i}`;
+                    const reasoningExpanded = expandedReasoningKey === cardKey;
+                    const reasoningFull = item.reasoning.trim();
+                    const needsReasoningToggle =
+                      reasoningFull.length > 90 ||
+                      splitIntoSentences(reasoningFull).length > 1;
 
                     return (
                       <div
-                        key={`${item.id ?? item.ticker}-${item.strike}-${i}`}
-                        className="flex flex-col rounded-2xl border border-zinc-700/60 bg-zinc-950/50 p-4 shadow-sm shadow-black/20 ring-1 ring-inset ring-white/[0.04]"
+                        key={cardKey}
+                        className="flex w-full min-w-0 flex-col rounded-2xl border border-zinc-700/60 bg-zinc-950/50 p-3 shadow-sm shadow-black/20 ring-1 ring-inset ring-white/[0.04]"
                       >
                         {/* Header */}
-                        <div className="mb-4 flex flex-wrap items-center gap-2 gap-y-2">
+                        <div className="mb-3 flex flex-wrap items-center gap-2 gap-y-2">
                           <span className="text-lg font-bold tracking-tight text-white">
                             {item.ticker}
                           </span>
@@ -861,11 +844,11 @@ export function PositionsClient() {
                         </div>
 
                         {/* Price row */}
-                        <div className="mb-4 rounded-xl border border-zinc-800/90 bg-zinc-900/70 px-4 py-3 ring-1 ring-inset ring-white/[0.03]">
+                        <div className="mb-3 rounded-xl border border-zinc-800/90 bg-zinc-900/70 px-3 py-2 ring-1 ring-inset ring-white/[0.03]">
                           <p className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
                             Premium
                           </p>
-                          <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:gap-4">
+                          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:gap-3">
                             <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-lg font-semibold tabular-nums tracking-tight text-white sm:text-xl">
                               <span>
                                 Entry:{" "}
@@ -897,15 +880,21 @@ export function PositionsClient() {
                         </div>
 
                         {/* Thesis vs update */}
-                        <div className="mb-4 grid gap-3 md:grid-cols-2">
+                        <div className="mb-3 grid gap-2 md:grid-cols-2 md:items-start">
                           <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-3 ring-1 ring-inset ring-white/[0.03]">
-                            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
                               Original thesis
                             </p>
-                            <p className="text-sm leading-relaxed text-zinc-300">
-                              {item.original_thesis.trim() || "—"}
-                            </p>
-                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <div className="relative">
+                              <p className="text-sm leading-snug text-zinc-300 line-clamp-3">
+                                {item.original_thesis.trim() || "—"}
+                              </p>
+                              <div
+                                className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-zinc-900 via-zinc-900/70 to-transparent"
+                                aria-hidden
+                              />
+                            </div>
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
                               <span
                                 className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${scoreBadgeClass(item.signal_score)}`}
                               >
@@ -928,7 +917,7 @@ export function PositionsClient() {
                                 : "border-l-red-500/75"
                             }`}
                           >
-                            <div className="mb-2 flex items-center justify-between gap-2">
+                            <div className="mb-1.5 flex items-center justify-between gap-2">
                               <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
                                 Thesis update
                               </p>
@@ -942,7 +931,7 @@ export function PositionsClient() {
                                 {item.thesis_still_valid ? "VALID" : "INVALID"}
                               </span>
                             </div>
-                            <ul className="mt-1 list-disc space-y-2 pl-4 text-sm leading-relaxed text-zinc-300">
+                            <ul className="mt-0 list-disc space-y-1 pl-4 text-sm leading-snug text-zinc-300">
                               {(item.thesis_update.trim()
                                 ? thesisUpdateBullets(item.thesis_update)
                                 : []
@@ -956,53 +945,46 @@ export function PositionsClient() {
                               )}
                             </ul>
                             {item.score_reasoning && (
-                              <p className="mt-2 border-t border-zinc-800/80 pt-2 text-xs leading-relaxed text-zinc-500">
+                              <p className="mt-1.5 border-t border-zinc-800/80 pt-1.5 text-xs leading-snug text-zinc-500">
                                 Score note: {item.score_reasoning}
                               </p>
                             )}
                           </div>
                         </div>
 
-                        {/* Four-box grid */}
-                        <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                          <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
-                            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                        {/* Four-box grid — 2×2 */}
+                        <div className="mb-3 grid grid-cols-2 gap-3">
+                          <div className="min-w-0 rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
+                            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
                               Target exit
                             </p>
-                            <div className="flex flex-wrap items-start gap-x-2 gap-y-1">
+                            <div className="flex flex-wrap items-start gap-x-1.5 gap-y-1">
                               <div className="min-w-0 flex-1">
                                 <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
                                   Original
                                 </p>
-                                <p className="mt-0.5 text-xs leading-snug text-zinc-500">
+                                <p className="mt-0.5 text-sm leading-snug text-zinc-500">
                                   {item.original_target_exit.trim() || "—"}
                                 </p>
                               </div>
-                              <span className="shrink-0 pt-4 text-zinc-600">
+                              <span className="shrink-0 self-center text-zinc-600">
                                 →
                               </span>
                               <div className="min-w-0 flex-1">
                                 <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-500/80">
                                   Updated
                                 </p>
-                                <p className="mt-0.5 text-sm font-bold leading-snug text-emerald-300">
+                                <p className="mt-0.5 text-xs font-semibold leading-snug text-emerald-300">
                                   {item.updated_target_exit.trim() || "—"}
                                 </p>
                               </div>
                             </div>
-                            {exitBullets.length > 0 && (
-                              <ul className="mt-3 list-disc space-y-1.5 border-t border-zinc-800/80 pt-3 pl-4 text-xs leading-snug text-zinc-400">
-                                {exitBullets.map((b, bi) => (
-                                  <li key={bi}>{b}</li>
-                                ))}
-                              </ul>
-                            )}
                           </div>
-                          <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
-                            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                          <div className="min-w-0 rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
+                            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
                               Stop loss
                             </p>
-                            <div className="space-y-3 text-sm leading-snug text-zinc-300">
+                            <div className="space-y-2 text-sm leading-snug text-zinc-300">
                               <p>
                                 <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
                                   PREMIUM STOP:
@@ -1021,11 +1003,11 @@ export function PositionsClient() {
                               </p>
                             </div>
                           </div>
-                          <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
-                            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                          <div className="min-w-0 rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
+                            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
                               Time remaining
                             </p>
-                            <ul className="list-disc space-y-2 pl-4 text-sm leading-relaxed text-zinc-300">
+                            <ul className="list-disc space-y-1 pl-4 text-sm leading-snug text-zinc-300">
                               {(item.time_remaining_note.trim()
                                 ? timeRemainingBullets(item.time_remaining_note)
                                 : []
@@ -1039,12 +1021,12 @@ export function PositionsClient() {
                               )}
                             </ul>
                           </div>
-                          <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
-                            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                          <div className="min-w-0 rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
+                            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
                               Watch for
                             </p>
                             {item.what_to_watch.trim() ? (
-                              <ol className="list-decimal space-y-2 pl-5 text-sm leading-relaxed text-zinc-300 marker:text-zinc-500">
+                              <ol className="list-decimal space-y-1 pl-5 text-sm leading-snug text-zinc-300 marker:text-zinc-500">
                                 {watchForNumberedItems(item.what_to_watch).map(
                                   (line, wi) => (
                                     <li key={wi} className="pl-1">
@@ -1060,15 +1042,28 @@ export function PositionsClient() {
                         </div>
 
                         {/* Reasoning */}
-                        <div className="mt-auto rounded-xl border border-emerald-500/15 bg-emerald-500/[0.06] px-4 py-3 ring-1 ring-inset ring-emerald-500/10">
+                        <div className="mt-auto rounded-xl border border-emerald-500/15 bg-emerald-500/[0.06] px-3 py-2 ring-1 ring-inset ring-emerald-500/10">
                           <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-500/70">
                             Reasoning
                           </p>
-                          <p className="mt-1.5 text-sm leading-relaxed text-zinc-200">
-                            {item.reasoning.trim()
-                              ? truncateReasoningParagraph(item.reasoning.trim(), 3)
-                              : "—"}
+                          <p
+                            className={`mt-1 text-sm leading-snug text-zinc-200 ${reasoningExpanded ? "" : "line-clamp-2"}`}
+                          >
+                            {reasoningFull || "—"}
                           </p>
+                          {needsReasoningToggle && reasoningFull ? (
+                            <button
+                              type="button"
+                              className="mt-1 text-xs font-medium text-emerald-400/90 hover:text-emerald-300"
+                              onClick={() =>
+                                setExpandedReasoningKey((prev) =>
+                                  prev === cardKey ? null : cardKey,
+                                )
+                              }
+                            >
+                              {reasoningExpanded ? "Show less" : "Show more"}
+                            </button>
+                          ) : null}
                         </div>
                       </div>
                     );
