@@ -341,30 +341,12 @@ function formatPrice(n: number) {
   return `$${n.toFixed(2)}`;
 }
 
-function scoreBadgeClass(score: number | null | undefined) {
-  if (score == null) return "bg-zinc-700/50 text-zinc-300";
-  if (score >= 80) return "bg-emerald-500/20 text-emerald-300";
-  if (score >= 60) return "bg-amber-500/20 text-amber-300";
-  return "bg-red-500/20 text-red-300";
-}
-
 /** Display-only: split prose into sentences for bullets/lists. */
 function splitIntoSentences(text: string): string[] {
   const t = text.trim();
   if (!t) return [];
   const parts = t.split(/(?<=[.!?])\s+/);
   return parts.map((s) => s.trim()).filter(Boolean);
-}
-
-function thesisUpdateBullets(text: string): string[] {
-  const t = text.trim();
-  if (!t) return [];
-  let parts = splitIntoSentences(t);
-  if (parts.length <= 1 && t.includes(";")) {
-    parts = t.split(";").map((s) => s.trim()).filter(Boolean);
-  }
-  if (parts.length === 0) return [t];
-  return parts.slice(0, 4);
 }
 
 function premiumTechnicalStopLines(updatedStop: string): {
@@ -391,26 +373,63 @@ function premiumTechnicalStopLines(updatedStop: string): {
   return { premium: "—", technical: t };
 }
 
-function timeRemainingBullets(note: string): string[] {
-  const t = note.trim();
-  if (!t) return [];
-  let parts = splitIntoSentences(t);
-  if (parts.length <= 1 && t.includes(";")) {
-    parts = t.split(";").map((s) => s.trim()).filter(Boolean);
-  }
-  if (parts.length === 0) return [t];
-  return parts.slice(0, 3);
+function extractDaysRemaining(note: string): number | null {
+  const m = note.match(/(\d+)\s+days?/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-function watchForNumberedItems(text: string): string[] {
-  const t = text.trim();
-  if (!t) return [];
-  let parts = splitIntoSentences(t);
-  if (parts.length <= 1 && t.includes(";")) {
-    parts = t.split(";").map((s) => s.trim()).filter(Boolean);
-  }
-  if (parts.length === 0) return [t];
-  return parts.slice(0, 2);
+function formatMilestoneDate(daysFromNow: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + Math.max(0, Math.round(daysFromNow)));
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function extractFirstDollarValue(text: string): string {
+  const m = text.match(/\$[0-9]+(?:\.[0-9]{1,2})?/);
+  return m ? m[0] : "$—";
+}
+
+function extractPremiumStopAmount(stopText: string): string {
+  const amount = extractFirstDollarValue(stopText);
+  return amount === "$—" ? "—" : amount;
+}
+
+function oneLineSentence(text: string): string {
+  const first = splitIntoSentences(text)[0] ?? text.trim();
+  return first || "—";
+}
+
+function buildMilestones(
+  timeRemainingNote: string,
+  whatToWatch: string,
+  updatedTargetExit: string,
+) {
+  const days = extractDaysRemaining(timeRemainingNote) ?? 21;
+  const t1 = Math.max(1, Math.round(days / 3));
+  const t2 = Math.max(2, Math.round((days * 2) / 3));
+  const t3 = Math.max(0, days - 3);
+  const targetDollar = extractFirstDollarValue(updatedTargetExit);
+  const watchSentence = oneLineSentence(whatToWatch);
+
+  return [
+    {
+      date: formatMilestoneDate(t1),
+      tone: "good" as const,
+      note: `If premium is above ${targetDollar}, thesis on track.`,
+    },
+    {
+      date: formatMilestoneDate(t2),
+      tone: "watch" as const,
+      note: `If premium hasn't reached ${targetDollar}, consider exiting. ${watchSentence}`,
+    },
+    {
+      date: formatMilestoneDate(t3),
+      tone: "exit" as const,
+      note: "MUST EXIT — theta decay critical.",
+    },
+  ];
 }
 
 export function PositionsClient() {
@@ -803,9 +822,6 @@ export function PositionsClient() {
                     const cardKey = `${item.id ?? item.ticker}-${item.strike}-${i}`;
                     const reasoningExpanded = expandedReasoningKey === cardKey;
                     const reasoningFull = item.reasoning.trim();
-                    const needsReasoningToggle =
-                      reasoningFull.length > 90 ||
-                      splitIntoSentences(reasoningFull).length > 1;
 
                     return (
                       <div
@@ -843,226 +859,171 @@ export function PositionsClient() {
                           </div>
                         </div>
 
-                        {/* Price row */}
-                        <div className="mb-3 rounded-xl border border-zinc-800/90 bg-zinc-900/70 px-3 py-2 ring-1 ring-inset ring-white/[0.03]">
-                          <p className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
-                            Premium
-                          </p>
-                          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:gap-3">
-                            <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-lg font-semibold tabular-nums tracking-tight text-white sm:text-xl">
-                              <span>
-                                Entry:{" "}
-                                <span className="text-zinc-100">
-                                  {entry > 0 ? `$${entry.toFixed(2)}` : "—"}
-                                </span>
+                        {/* SECTION 2 — Stats row */}
+                        <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                          <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-3">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                              Entry Price
+                            </p>
+                            <p className="mt-1 text-sm font-semibold tabular-nums text-zinc-100">
+                              {entry > 0 ? `$${entry.toFixed(2)}` : "—"}/contract
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-3">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                              Current Price
+                            </p>
+                            <div className="mt-1 flex items-center gap-2">
+                              <p className="text-sm font-semibold tabular-nums text-zinc-100">
+                                {current != null && Number.isFinite(current)
+                                  ? `$${current.toFixed(2)}`
+                                  : "—"}
+                                /contract
+                              </p>
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${pct != null && Number.isFinite(pct)
+                                  ? pct >= 0
+                                    ? "bg-emerald-500/15 text-emerald-300"
+                                    : "bg-red-500/15 text-red-300"
+                                  : "bg-zinc-700/50 text-zinc-300"
+                                  }`}
+                              >
+                                {pct != null && Number.isFinite(pct)
+                                  ? `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`
+                                  : "—"}
                               </span>
-                              <span className="text-zinc-600">→</span>
-                              <span>
-                                Current:{" "}
-                                <span className="text-zinc-100">
-                                  {current != null && Number.isFinite(current)
-                                    ? `$${current.toFixed(2)}`
-                                    : "—"}
-                                </span>
+                            </div>
+                          </div>
+                          <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-3">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                              Original Signal
+                            </p>
+                            <p className="mt-1 text-sm text-zinc-300">
+                              Score:{" "}
+                              <span className="font-semibold text-zinc-100">
+                                {item.signal_score ?? "—"}
                               </span>
                             </p>
-                            <div
-                              className={`text-2xl font-bold tabular-nums tracking-tight sm:text-3xl ${pnlClass}`}
-                            >
-                              <span className="mr-1.5 text-sm font-semibold uppercase tracking-wide text-zinc-500 sm:text-base">
-                                P&amp;L
+                          </div>
+                          <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-3">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                              Updated Signal
+                            </p>
+                            <p className="mt-1 text-sm text-zinc-300">
+                              Score:{" "}
+                              <span className="font-semibold text-zinc-100">
+                                {item.current_signal_score ?? "—"}
                               </span>
-                              {pct != null && Number.isFinite(pct)
-                                ? `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`
-                                : "—"}
-                            </div>
+                            </p>
                           </div>
                         </div>
 
-                        {/* Thesis vs update */}
-                        <div className="mb-3 grid gap-2 md:grid-cols-2 md:items-start">
-                          <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-3 ring-1 ring-inset ring-white/[0.03]">
-                            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                              Original thesis
+                        {/* SECTION 3 — Targets row */}
+                        <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                          <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
+                            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                              TARGET EXIT
                             </p>
-                            <div className="relative">
-                              <p className="text-sm leading-snug text-zinc-300 line-clamp-3">
-                                {item.original_thesis.trim() || "—"}
-                              </p>
-                              <div
-                                className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-zinc-900 via-zinc-900/70 to-transparent"
-                                aria-hidden
-                              />
-                            </div>
-                            <div className="mt-2 flex flex-wrap items-center gap-2">
-                              <span
-                                className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${scoreBadgeClass(item.signal_score)}`}
-                              >
-                                Signal {item.signal_score ?? "—"}
-                              </span>
-                              {item.current_signal_score != null && (
-                                <span
-                                  className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${scoreBadgeClass(item.current_signal_score)}`}
-                                >
-                                  Now {item.current_signal_score}
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                                  ORIGINAL
                                 </span>
-                              )}
-                            </div>
-                          </div>
-
-                          <div
-                            className={`rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-3 ring-1 ring-inset ring-white/[0.03] border-l-4 pl-3 md:pl-3 ${
-                              item.thesis_still_valid
-                                ? "border-l-emerald-500/75"
-                                : "border-l-red-500/75"
-                            }`}
-                          >
-                            <div className="mb-1.5 flex items-center justify-between gap-2">
-                              <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                                Thesis update
-                              </p>
-                              <span
-                                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                                  item.thesis_still_valid
-                                    ? "bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/25"
-                                    : "bg-red-500/15 text-red-300 ring-1 ring-red-500/25"
-                                }`}
-                              >
-                                {item.thesis_still_valid ? "VALID" : "INVALID"}
-                              </span>
-                            </div>
-                            <ul className="mt-0 list-disc space-y-1 pl-4 text-sm leading-snug text-zinc-300">
-                              {(item.thesis_update.trim()
-                                ? thesisUpdateBullets(item.thesis_update)
-                                : []
-                              ).map((line, bi) => (
-                                <li key={bi}>{line}</li>
-                              ))}
-                              {!item.thesis_update.trim() && (
-                                <li className="list-none pl-0 text-zinc-500">
-                                  —
-                                </li>
-                              )}
-                            </ul>
-                            {item.score_reasoning && (
-                              <p className="mt-1.5 border-t border-zinc-800/80 pt-1.5 text-xs leading-snug text-zinc-500">
-                                Score note: {item.score_reasoning}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Four-box grid — 2×2 */}
-                        <div className="mb-3 grid grid-cols-2 gap-3">
-                          <div className="min-w-0 rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
-                            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                              Target exit
-                            </p>
-                            <div className="flex flex-wrap items-start gap-x-1.5 gap-y-1">
-                              <div className="min-w-0 flex-1">
-                                <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                                  Original
-                                </p>
-                                <p className="mt-0.5 text-sm leading-snug text-zinc-500">
+                                <p className="truncate text-xs text-zinc-500">
                                   {item.original_target_exit.trim() || "—"}
                                 </p>
                               </div>
-                              <span className="shrink-0 self-center text-zinc-600">
-                                →
-                              </span>
-                              <div className="min-w-0 flex-1">
-                                <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-500/80">
-                                  Updated
-                                </p>
-                                <p className="mt-0.5 text-xs font-semibold leading-snug text-emerald-300">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-500/80">
+                                  UPDATED
+                                </span>
+                                <p className="truncate text-xs font-semibold text-emerald-300">
                                   {item.updated_target_exit.trim() || "—"}
                                 </p>
                               </div>
                             </div>
                           </div>
-                          <div className="min-w-0 rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
-                            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                              Stop loss
+
+                          <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
+                            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                              STOP LOSS
                             </p>
-                            <div className="space-y-2 text-sm leading-snug text-zinc-300">
-                              <p>
-                                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                            <div className="space-y-2 text-sm text-zinc-300">
+                              <p className="truncate">
+                                <span className="font-bold text-zinc-100">
                                   PREMIUM STOP:
                                 </span>{" "}
-                                <span className="font-bold text-zinc-100">
-                                  {stopLines.premium}
-                                </span>
+                                {extractPremiumStopAmount(stopLines.premium)}
                               </p>
-                              <p>
-                                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                              <p className="truncate">
+                                <span className="font-bold text-zinc-100">
                                   TECHNICAL STOP:
                                 </span>{" "}
-                                <span className="font-bold text-zinc-100">
-                                  {stopLines.technical}
-                                </span>
+                                {oneLineSentence(stopLines.technical)}
                               </p>
                             </div>
                           </div>
-                          <div className="min-w-0 rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
-                            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                              Time remaining
+                        </div>
+
+                        {/* SECTION 4 — Timeline */}
+                        <div className="mb-3 rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
+                          <div className="mb-2 flex items-center gap-2">
+                            <span className="text-xs">📅</span>
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                              PRICE MILESTONES
                             </p>
-                            <ul className="list-disc space-y-1 pl-4 text-sm leading-snug text-zinc-300">
-                              {(item.time_remaining_note.trim()
-                                ? timeRemainingBullets(item.time_remaining_note)
-                                : []
-                              ).map((line, bi) => (
-                                <li key={bi}>{line}</li>
-                              ))}
-                              {!item.time_remaining_note.trim() && (
-                                <li className="list-none pl-0 text-zinc-500">
-                                  —
-                                </li>
-                              )}
-                            </ul>
                           </div>
-                          <div className="min-w-0 rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
-                            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                              Watch for
-                            </p>
-                            {item.what_to_watch.trim() ? (
-                              <ol className="list-decimal space-y-1 pl-5 text-sm leading-snug text-zinc-300 marker:text-zinc-500">
-                                {watchForNumberedItems(item.what_to_watch).map(
-                                  (line, wi) => (
-                                    <li key={wi} className="pl-1">
-                                      {line}
-                                    </li>
-                                  ),
-                                )}
-                              </ol>
-                            ) : (
-                              <p className="text-sm text-zinc-500">—</p>
-                            )}
+                          <div className="space-y-2">
+                            {buildMilestones(
+                              item.time_remaining_note,
+                              item.what_to_watch,
+                              item.updated_target_exit,
+                            ).map((m, mi) => (
+                              <div
+                                key={`${cardKey}-m-${mi}`}
+                                className="flex items-center gap-2 rounded-lg border border-zinc-800/80 bg-zinc-900/40 px-2 py-1.5"
+                              >
+                                <span className="rounded-md bg-zinc-800/80 px-2 py-0.5 text-[10px] font-semibold text-zinc-300">
+                                  {m.date}
+                                </span>
+                                <span
+                                  className={`h-2 w-2 rounded-full ${m.tone === "good"
+                                    ? "bg-emerald-400"
+                                    : m.tone === "watch"
+                                      ? "bg-amber-400"
+                                      : "bg-red-400"
+                                    }`}
+                                />
+                                <p className="text-xs text-zinc-300">{m.note}</p>
+                              </div>
+                            ))}
                           </div>
                         </div>
 
-                        {/* Reasoning */}
+                        {/* SECTION 5 — Reasoning */}
                         <div className="mt-auto rounded-xl border border-emerald-500/15 bg-emerald-500/[0.06] px-3 py-2 ring-1 ring-inset ring-emerald-500/10">
-                          <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-500/70">
-                            Reasoning
-                          </p>
-                          <p
-                            className={`mt-1 text-sm leading-snug text-zinc-200 ${reasoningExpanded ? "" : "line-clamp-2"}`}
-                          >
-                            {reasoningFull || "—"}
-                          </p>
-                          {needsReasoningToggle && reasoningFull ? (
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="truncate text-sm text-zinc-200">
+                              {reasoningExpanded
+                                ? reasoningFull || "—"
+                                : oneLineSentence(reasoningFull || "—")}
+                            </p>
                             <button
                               type="button"
-                              className="mt-1 text-xs font-medium text-emerald-400/90 hover:text-emerald-300"
+                              className="shrink-0 text-xs font-medium text-emerald-400/90 hover:text-emerald-300"
                               onClick={() =>
                                 setExpandedReasoningKey((prev) =>
                                   prev === cardKey ? null : cardKey,
                                 )
                               }
                             >
-                              {reasoningExpanded ? "Show less" : "Show more"}
+                              {reasoningExpanded ? "Hide reasoning" : "Show reasoning"}
                             </button>
+                          </div>
+                          {reasoningExpanded && reasoningFull ? (
+                            <p className="mt-2 text-sm leading-snug text-zinc-200">
+                              {reasoningFull}
+                            </p>
                           ) : null}
                         </div>
                       </div>
