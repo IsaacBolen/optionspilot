@@ -401,6 +401,12 @@ function oneLineSentence(text: string): string {
   return first || "—";
 }
 
+function clampChars(text: string, maxChars: number): string {
+  const t = text.trim();
+  if (!t) return "—";
+  return t.length > maxChars ? t.slice(0, maxChars) : t;
+}
+
 function buildMilestones(
   timeRemainingNote: string,
   whatToWatch: string,
@@ -440,9 +446,6 @@ export function PositionsClient() {
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportVisible, setReportVisible] = useState(false);
-  const [expandedReasoningKey, setExpandedReasoningKey] = useState<
-    string | null
-  >(null);
   const [closeModal, setCloseModal] = useState<CloseModalState>(null);
 
   useEffect(() => {
@@ -820,8 +823,15 @@ export function PositionsClient() {
                       item.updated_stop_loss,
                     );
                     const cardKey = `${item.id ?? item.ticker}-${item.strike}-${i}`;
-                    const reasoningExpanded = expandedReasoningKey === cardKey;
                     const reasoningFull = item.reasoning.trim();
+                    const summaryText = splitIntoSentences(reasoningFull)
+                      .slice(0, 3)
+                      .join(" ");
+                    const scoreDelta =
+                      item.signal_score != null &&
+                      item.current_signal_score != null
+                        ? item.current_signal_score - item.signal_score
+                        : null;
 
                     return (
                       <div
@@ -860,21 +870,21 @@ export function PositionsClient() {
                         </div>
 
                         {/* SECTION 2 — Stats row */}
-                        <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                          <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-3">
+                        <div className="mb-3 grid grid-cols-2 gap-2">
+                          <div className="min-w-0 rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-3">
                             <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                              Entry Price
+                              ENTRY PRICE
                             </p>
-                            <p className="mt-1 text-sm font-semibold tabular-nums text-zinc-100">
+                            <p className="mt-1 truncate text-xl font-bold tabular-nums text-zinc-100">
                               {entry > 0 ? `$${entry.toFixed(2)}` : "—"}/contract
                             </p>
                           </div>
-                          <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-3">
+                          <div className="min-w-0 rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-3">
                             <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                              Current Price
+                              CURRENT PRICE
                             </p>
-                            <div className="mt-1 flex items-center gap-2">
-                              <p className="text-sm font-semibold tabular-nums text-zinc-100">
+                            <div className="mt-1 flex min-w-0 items-center gap-2">
+                              <p className="truncate text-xl font-bold tabular-nums text-zinc-100">
                                 {current != null && Number.isFinite(current)
                                   ? `$${current.toFixed(2)}`
                                   : "—"}
@@ -894,26 +904,32 @@ export function PositionsClient() {
                               </span>
                             </div>
                           </div>
-                          <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-3">
+                          <div className="min-w-0 rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-3">
                             <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                              Original Signal
+                              ORIGINAL SIGNAL
                             </p>
-                            <p className="mt-1 text-sm text-zinc-300">
-                              Score:{" "}
-                              <span className="font-semibold text-zinc-100">
-                                {item.signal_score ?? "—"}
-                              </span>
+                            <p className="mt-1 truncate text-xl font-bold tabular-nums text-zinc-100">
+                              {item.signal_score ?? "—"}
                             </p>
                           </div>
-                          <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-3">
+                          <div className="min-w-0 rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-3">
                             <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                              Updated Signal
+                              UPDATED SIGNAL
                             </p>
-                            <p className="mt-1 text-sm text-zinc-300">
-                              Score:{" "}
-                              <span className="font-semibold text-zinc-100">
-                                {item.current_signal_score ?? "—"}
-                              </span>
+                            <p className="mt-1 truncate text-xl font-bold tabular-nums text-zinc-100">
+                              {item.current_signal_score ?? "—"}
+                              {scoreDelta != null ? (
+                                <span
+                                  className={`ml-1 text-sm ${scoreDelta > 0
+                                    ? "text-emerald-300"
+                                    : scoreDelta < 0
+                                      ? "text-red-300"
+                                      : "text-zinc-400"
+                                    }`}
+                                >
+                                  {scoreDelta > 0 ? "↑" : scoreDelta < 0 ? "↓" : "→"}
+                                </span>
+                              ) : null}
                             </p>
                           </div>
                         </div>
@@ -927,18 +943,18 @@ export function PositionsClient() {
                             <div className="space-y-2">
                               <div className="flex items-center gap-2">
                                 <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                                  ORIGINAL
+                                  WAS:
                                 </span>
-                                <p className="truncate text-xs text-zinc-500">
-                                  {item.original_target_exit.trim() || "—"}
+                                <p className="w-[240px] truncate text-xs text-zinc-500">
+                                  {clampChars(item.original_target_exit, 40)}
                                 </p>
                               </div>
                               <div className="flex items-center gap-2">
                                 <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-500/80">
-                                  UPDATED
+                                  NOW:
                                 </span>
-                                <p className="truncate text-xs font-semibold text-emerald-300">
-                                  {item.updated_target_exit.trim() || "—"}
+                                <p className="w-[240px] truncate text-xs font-semibold text-emerald-300">
+                                  {clampChars(item.updated_target_exit, 40)}
                                 </p>
                               </div>
                             </div>
@@ -951,15 +967,15 @@ export function PositionsClient() {
                             <div className="space-y-2 text-sm text-zinc-300">
                               <p className="truncate">
                                 <span className="font-bold text-zinc-100">
-                                  PREMIUM STOP:
+                                  PREMIUM:
                                 </span>{" "}
                                 {extractPremiumStopAmount(stopLines.premium)}
                               </p>
                               <p className="truncate">
                                 <span className="font-bold text-zinc-100">
-                                  TECHNICAL STOP:
+                                  TECHNICAL:
                                 </span>{" "}
-                                {oneLineSentence(stopLines.technical)}
+                                {clampChars(oneLineSentence(stopLines.technical), 40)}
                               </p>
                             </div>
                           </div>
@@ -994,37 +1010,19 @@ export function PositionsClient() {
                                       : "bg-red-400"
                                     }`}
                                 />
-                                <p className="text-xs text-zinc-300">{m.note}</p>
+                                <p className="min-w-0 flex-1 truncate text-xs text-zinc-300">
+                                  {m.note}
+                                </p>
                               </div>
                             ))}
                           </div>
                         </div>
 
-                        {/* SECTION 5 — Reasoning */}
+                        {/* SECTION 5 — Summary */}
                         <div className="mt-auto rounded-xl border border-emerald-500/15 bg-emerald-500/[0.06] px-3 py-2 ring-1 ring-inset ring-emerald-500/10">
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="truncate text-sm text-zinc-200">
-                              {reasoningExpanded
-                                ? reasoningFull || "—"
-                                : oneLineSentence(reasoningFull || "—")}
-                            </p>
-                            <button
-                              type="button"
-                              className="shrink-0 text-xs font-medium text-emerald-400/90 hover:text-emerald-300"
-                              onClick={() =>
-                                setExpandedReasoningKey((prev) =>
-                                  prev === cardKey ? null : cardKey,
-                                )
-                              }
-                            >
-                              {reasoningExpanded ? "Hide reasoning" : "Show reasoning"}
-                            </button>
-                          </div>
-                          {reasoningExpanded && reasoningFull ? (
-                            <p className="mt-2 text-sm leading-snug text-zinc-200">
-                              {reasoningFull}
-                            </p>
-                          ) : null}
+                          <p className="truncate italic text-sm text-zinc-400">
+                            {summaryText || "—"}
+                          </p>
                         </div>
                       </div>
                     );
