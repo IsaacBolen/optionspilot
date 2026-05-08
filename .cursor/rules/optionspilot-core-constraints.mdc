@@ -21,8 +21,8 @@ alwaysApply: true
 - Valid examples: `TSLA260508C00450000`, `IWM260515C00281000`.
 
 ## Database Field Name Safety
-- Option type field is `p.option_type` (never `p.type`).
-- Strike field is `p.strike_price` (never `p.strike`).
+- Option type field is `p.type` (never `p.option_type`).
+- Strike field is `p.strike` (never `p.strike_price`).
 
 ## Daily Refresh Behavior
 - Daily refresh on positions page should:

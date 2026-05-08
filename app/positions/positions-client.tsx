@@ -229,32 +229,106 @@ function normalizePositionFromApi(raw: unknown): PositionRow | null {
   };
 }
 
+type PositionReportAction = "Hold" | "Consider Selling" | "Sell Now";
+type PositionReportConfidence = "High" | "Medium" | "Low";
+
 type PositionReport = {
   id?: string;
   ticker: string;
-  type: string;
+  type: "Call" | "Put";
   strike: number;
-  recommendation: "Hold" | "Consider Selling" | "Sell Now" | "Already Expired";
-  urgency: "Low" | "Medium" | "High";
-  summary: string;
-  exitTarget: {
-    previousTarget: string;
-    currentTarget: string;
-    changed: boolean;
-    reason: string;
-  };
-  entryPrice?: number | null;
-  currentPrice: number | null;
-  ai_thesis?: string | null;
+  action: PositionReportAction;
+  entry_price: number;
+  current_price: number | null;
+  pnl_percent: number | null;
+  original_thesis: string;
+  thesis_still_valid: boolean;
+  thesis_update: string;
+  original_target_exit: string;
+  updated_target_exit: string;
+  original_stop_loss: string;
+  updated_stop_loss: string;
+  time_remaining_note: string;
+  what_to_watch: string;
+  confidence: PositionReportConfidence;
+  reasoning: string;
   signal_score?: number | null;
   current_signal_score?: number | null;
   score_reasoning?: string | null;
-  checkInDates: {
-    date: string;
-    reason: string;
-  }[];
-  redFlags: string;
 };
+
+function normalizeReportFromApi(
+  raw: Record<string, unknown>,
+  ctx: {
+    match?: PositionRow;
+    entry_price: number;
+    current_price: number | null;
+    pnl_percent: number | null;
+    current_signal_score: number | null;
+    score_reasoning: string | null;
+  },
+): PositionReport {
+  const actionRaw = String(raw.action ?? "Hold");
+  const action: PositionReportAction =
+    actionRaw === "Sell Now"
+      ? "Sell Now"
+      : actionRaw === "Consider Selling"
+        ? "Consider Selling"
+        : "Hold";
+
+  const confRaw = String(raw.confidence ?? "Medium");
+  const confidence: PositionReportConfidence =
+    confRaw === "High" ? "High" : confRaw === "Low" ? "Low" : "Medium";
+
+  const type: "Call" | "Put" = ctx.match?.type ?? "Call";
+
+  return {
+    id: ctx.match?.id,
+    ticker: String(raw.ticker ?? ctx.match?.ticker ?? "").trim().toUpperCase(),
+    type,
+    strike:
+      ctx.match?.strike ??
+      (Number.isFinite(Number(raw.strike)) ? Number(raw.strike) : 0),
+    action,
+    entry_price: ctx.entry_price,
+    current_price: ctx.current_price,
+    pnl_percent: ctx.pnl_percent,
+    original_thesis: String(raw.original_thesis ?? ""),
+    thesis_still_valid: Boolean(raw.thesis_still_valid),
+    thesis_update: String(raw.thesis_update ?? ""),
+    original_target_exit: String(raw.original_target_exit ?? ""),
+    updated_target_exit: String(raw.updated_target_exit ?? ""),
+    original_stop_loss: String(raw.original_stop_loss ?? ""),
+    updated_stop_loss: String(raw.updated_stop_loss ?? ""),
+    time_remaining_note: String(raw.time_remaining_note ?? ""),
+    what_to_watch: String(raw.what_to_watch ?? ""),
+    confidence,
+    reasoning: String(raw.reasoning ?? ""),
+    signal_score: ctx.match?.signal_score ?? null,
+    current_signal_score: ctx.current_signal_score,
+    score_reasoning: ctx.score_reasoning,
+  };
+}
+
+function reportActionBadgeClass(action: PositionReportAction) {
+  if (action === "Sell Now") {
+    return "bg-red-500/15 text-red-300 ring-1 ring-red-500/25";
+  }
+  if (action === "Consider Selling") {
+    return "bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/25";
+  }
+  return "bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/25";
+}
+
+function reportConfidenceBadgeClass(confidence: PositionReportConfidence) {
+  if (confidence === "High") {
+    return "bg-emerald-500/10 text-emerald-200 ring-1 ring-emerald-500/20";
+  }
+  if (confidence === "Medium") {
+    return "bg-amber-500/10 text-amber-200 ring-1 ring-amber-500/20";
+  }
+  return "bg-zinc-700/60 text-zinc-300 ring-1 ring-zinc-600/40";
+}
 
 function formatMoney(n: number) {
   const abs = Math.abs(n);
@@ -387,27 +461,58 @@ export function PositionsClient() {
         positionUpdates = data.positionUpdates ?? [];
       }
 
-      const enrichedReport = data.report.map((item: PositionReport) => {
-        const match = openPositions.find(
-          (p) => p.ticker === item.ticker && p.strike === item.strike
-        );
+      const enrichedReport = data.report.map((item: unknown, index: number) => {
+        const raw =
+          item && typeof item === "object"
+            ? (item as Record<string, unknown>)
+            : {};
+        const match = openPositions[index];
         const livePriceMatch = match
           ? (data.priceUpdates ?? []).find((u) => u.id === match.id)
           : undefined;
         const scoreMatch = match
           ? positionUpdates.find((u) => u.id === match.id)
           : undefined;
-        return {
-          ...item,
-          id: match?.id,
-          entryPrice: match?.entry_price ?? null,
-          currentPrice: livePriceMatch?.current_price ?? match?.current_price ?? null,
-          ai_thesis: match?.ai_thesis ?? null,
-          signal_score: match?.signal_score ?? null,
-          current_signal_score:
-            scoreMatch?.current_signal_score ?? match?.current_signal_score ?? null,
+
+        const entryFromApi = Number(raw.entry_price);
+        const entry =
+          Number.isFinite(entryFromApi) && entryFromApi > 0
+            ? entryFromApi
+            : match?.entry_price ?? 0;
+
+        const live = livePriceMatch?.current_price;
+        const currentFromApi = raw.current_price;
+        const current =
+          live != null && Number.isFinite(Number(live)) && Number(live) > 0
+            ? Number(live)
+            : currentFromApi != null &&
+                currentFromApi !== undefined &&
+                Number.isFinite(Number(currentFromApi))
+              ? Number(currentFromApi)
+              : null;
+
+        const pnl_percent =
+          entry > 0 && current != null && Number.isFinite(current)
+            ? Math.round(((current - entry) / entry) * 1000) / 10
+            : raw.pnl_percent != null &&
+                raw.pnl_percent !== undefined &&
+                Number.isFinite(Number(raw.pnl_percent))
+              ? Number(raw.pnl_percent)
+              : null;
+
+        const cs =
+          scoreMatch?.current_signal_score ?? match?.current_signal_score ?? null;
+        const current_signal_score =
+          cs != null && Number.isFinite(Number(cs)) ? Number(cs) : null;
+
+        return normalizeReportFromApi(raw, {
+          match,
+          entry_price: entry,
+          current_price: current,
+          pnl_percent,
+          current_signal_score,
           score_reasoning: scoreMatch?.score_reasoning ?? null,
-        };
+        });
       });
       setReport(enrichedReport);
 
@@ -613,105 +718,202 @@ export function PositionsClient() {
                 <p className="text-sm text-red-400 py-4">{reportError}</p>
               )}
               {!reportLoading && report.length > 0 && (
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {report.map((item, i) => (
-                    (() => {
-                      const entry = item.entryPrice ?? null;
-                      const current = item.currentPrice ?? null;
-                      const deltaPct =
-                        entry != null &&
-                        current != null &&
-                        Number.isFinite(entry) &&
-                        Number.isFinite(current) &&
-                        entry > 0
-                          ? ((current - entry) / entry) * 100
-                          : null;
-                      const deltaClass =
-                        deltaPct == null
-                          ? "text-zinc-400"
-                          : deltaPct >= 0
-                            ? "text-emerald-400"
-                            : "text-red-400";
-                      const baseScore = item.signal_score ?? null;
-                      const currentScore = item.current_signal_score ?? null;
-                      const arrowClass =
-                        baseScore != null && currentScore != null
-                          ? currentScore > baseScore
-                            ? "text-emerald-400"
-                            : currentScore < baseScore
-                              ? "text-red-400"
-                              : "text-zinc-500"
-                          : "text-zinc-500";
+                <div className="grid gap-5 sm:grid-cols-2">
+                  {report.map((item, i) => {
+                    const entry = item.entry_price;
+                    const current = item.current_price;
+                    const pct = item.pnl_percent;
+                    const pnlClass =
+                      pct == null
+                        ? "text-zinc-500"
+                        : pct >= 0
+                          ? "text-emerald-400"
+                          : "text-red-400";
 
-                      return (
-                        <div key={i} className="rounded-xl border border-zinc-700/60 bg-zinc-950/40 p-4">
-                          <div className="mb-3 flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-white">{item.ticker}</span>
-                              <span className="text-xs text-zinc-400">
-                                {item.type} ${item.strike}
-                              </span>
-                            </div>
+                    return (
+                      <div
+                        key={`${item.id ?? item.ticker}-${item.strike}-${i}`}
+                        className="flex flex-col rounded-2xl border border-zinc-700/60 bg-zinc-950/50 p-4 shadow-sm shadow-black/20 ring-1 ring-inset ring-white/[0.04]"
+                      >
+                        {/* Header */}
+                        <div className="mb-4 flex flex-wrap items-center gap-2 gap-y-2">
+                          <span className="text-lg font-bold tracking-tight text-white">
+                            {item.ticker}
+                          </span>
+                          <span
+                            className={
+                              item.type === "Call"
+                                ? "rounded-md bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-300"
+                                : "rounded-md bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-300"
+                            }
+                          >
+                            {item.type}
+                          </span>
+                          <span className="text-sm tabular-nums text-zinc-400">
+                            ${item.strike}
+                          </span>
+                          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
                             <span
-                              className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                                item.recommendation === "Sell Now"
-                                  ? "bg-red-500/20 text-red-300"
-                                  : item.recommendation === "Consider Selling"
-                                    ? "bg-amber-500/20 text-amber-300"
-                                    : "bg-emerald-500/20 text-emerald-300"
-                              }`}
+                              className={`rounded-full px-2.5 py-1 text-xs font-semibold ${reportActionBadgeClass(item.action)}`}
                             >
-                              {item.recommendation}
+                              {item.action}
+                            </span>
+                            <span
+                              className={`rounded-full px-2.5 py-1 text-xs font-semibold ${reportConfidenceBadgeClass(item.confidence)}`}
+                            >
+                              {item.confidence}
                             </span>
                           </div>
+                        </div>
 
-                          <div className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-3">
-                            <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/60 p-3">
-                              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                                Original Thesis
-                              </p>
-                              <p className="mb-3 text-sm leading-relaxed text-zinc-300">
-                                {item.ai_thesis ?? "No thesis recorded."}
-                              </p>
+                        {/* Price row */}
+                        <div className="mb-4 rounded-xl border border-zinc-800/90 bg-zinc-900/70 px-4 py-3 ring-1 ring-inset ring-white/[0.03]">
+                          <p className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+                            Premium
+                          </p>
+                          <p className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-lg font-semibold tabular-nums tracking-tight text-white sm:text-xl">
+                            <span>
+                              Entry:{" "}
+                              <span className="text-zinc-100">
+                                {entry > 0 ? `$${entry.toFixed(2)}` : "—"}
+                              </span>
+                            </span>
+                            <span className="text-zinc-600">→</span>
+                            <span>
+                              Current:{" "}
+                              <span className="text-zinc-100">
+                                {current != null && Number.isFinite(current)
+                                  ? `$${current.toFixed(2)}`
+                                  : "—"}
+                              </span>
+                            </span>
+                            <span className="text-zinc-600">→</span>
+                            <span className={pnlClass}>
+                              P&amp;L:{" "}
+                              {pct != null && Number.isFinite(pct)
+                                ? `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`
+                                : "—"}
+                            </span>
+                          </p>
+                        </div>
+
+                        {/* Thesis vs update */}
+                        <div className="mb-4 grid gap-3 md:grid-cols-2">
+                          <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-3 ring-1 ring-inset ring-white/[0.03]">
+                            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                              Original thesis
+                            </p>
+                            <p className="text-sm leading-relaxed text-zinc-300">
+                              {item.original_thesis.trim() || "—"}
+                            </p>
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
                               <span
-                                className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${scoreBadgeClass(item.signal_score)}`}
+                                className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${scoreBadgeClass(item.signal_score)}`}
                               >
                                 Signal {item.signal_score ?? "—"}
                               </span>
-                            </div>
-
-                            <div className="flex items-center justify-center px-1">
-                              <span className={`text-lg font-bold ${arrowClass}`}>→</span>
-                            </div>
-
-                            <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/60 p-3">
-                              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                                Today&apos;s View
-                              </p>
-                              <p className={`mb-3 text-sm font-medium ${deltaClass}`}>
-                                {entry != null ? `$${entry.toFixed(2)}` : "—"}{" "}
-                                <span className="text-zinc-500">→</span>{" "}
-                                {current != null ? `$${current.toFixed(2)}` : "—"}{" "}
-                                <span className={deltaClass}>
-                                  ({deltaPct != null ? `${deltaPct >= 0 ? "+" : ""}${deltaPct.toFixed(1)}%` : "—"})
-                                </span>
-                              </p>
-                              <div className="mb-2">
+                              {item.current_signal_score != null && (
                                 <span
-                                  className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${scoreBadgeClass(item.current_signal_score)}`}
+                                  className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${scoreBadgeClass(item.current_signal_score)}`}
                                 >
-                                  Current Score {item.current_signal_score ?? "—"}
+                                  Now {item.current_signal_score}
                                 </span>
-                              </div>
-                              <p className="text-sm leading-relaxed text-zinc-400">
-                                {item.score_reasoning ?? "No score reasoning returned."}
-                              </p>
+                              )}
                             </div>
                           </div>
+
+                          <div
+                            className={`rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-3 ring-1 ring-inset ring-white/[0.03] border-l-4 pl-3 md:pl-3 ${
+                              item.thesis_still_valid
+                                ? "border-l-emerald-500/75"
+                                : "border-l-red-500/75"
+                            }`}
+                          >
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                                Thesis update
+                              </p>
+                              <span
+                                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                                  item.thesis_still_valid
+                                    ? "bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/25"
+                                    : "bg-red-500/15 text-red-300 ring-1 ring-red-500/25"
+                                }`}
+                              >
+                                {item.thesis_still_valid ? "Valid" : "Invalid"}
+                              </span>
+                            </div>
+                            <p className="text-sm leading-relaxed text-zinc-300">
+                              {item.thesis_update.trim() || "—"}
+                            </p>
+                            {item.score_reasoning && (
+                              <p className="mt-2 border-t border-zinc-800/80 pt-2 text-xs leading-relaxed text-zinc-500">
+                                Score note: {item.score_reasoning}
+                              </p>
+                            )}
+                          </div>
                         </div>
-                      );
-                    })()
-                  ))}
+
+                        {/* Four-box grid */}
+                        <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
+                            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                              Target exit
+                            </p>
+                            <p className="text-sm leading-snug text-zinc-300">
+                              <span className="text-zinc-400">
+                                {item.original_target_exit || "—"}
+                              </span>
+                              <span className="mx-1 text-zinc-600">→</span>
+                              <span className="text-emerald-300/95">
+                                {item.updated_target_exit || "—"}
+                              </span>
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
+                            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                              Stop loss
+                            </p>
+                            <p className="text-sm leading-snug text-zinc-300">
+                              <span className="text-zinc-400">
+                                {item.original_stop_loss || "—"}
+                              </span>
+                              <span className="mx-1 text-zinc-600">→</span>
+                              <span className="text-amber-200/90">
+                                {item.updated_stop_loss || "—"}
+                              </span>
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
+                            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                              Time remaining
+                            </p>
+                            <p className="text-sm leading-relaxed text-zinc-300">
+                              {item.time_remaining_note || "—"}
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
+                            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                              Watch for
+                            </p>
+                            <p className="text-sm leading-relaxed text-zinc-300">
+                              {item.what_to_watch || "—"}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Reasoning */}
+                        <div className="mt-auto rounded-xl border border-emerald-500/15 bg-emerald-500/[0.06] px-4 py-3 ring-1 ring-inset ring-emerald-500/10">
+                          <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-500/70">
+                            Reasoning
+                          </p>
+                          <p className="mt-1.5 text-sm leading-relaxed text-zinc-200">
+                            {item.reasoning.trim() || "—"}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

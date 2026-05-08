@@ -11,57 +11,47 @@ const TRADIER_KEY = process.env.TRADIER_API_KEY;
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
-const REPORT_SYSTEM = `You are an options trading coach giving a daily situation report on a trader's open positions. For each position, analyze the original thesis against current market conditions and give a concrete, actionable recommendation.
+const REPORT_SYSTEM = `You are an options trading coach. For each open position, write a full "thesis vs reality" update: compare the saved trade thesis (and any targets or risk language in it) to what is happening now—especially premium vs entry, passage of time versus the original hold plan, and whether the thesis conditions are playing out. Factor in signal_score from the input only as context for how strong the entry setup was rated.
 
 Return raw JSON only. Do not wrap in markdown code fences. Do not use \`\`\`json. Start your response directly with [ and end with ].
 
-Today's date is provided in the prompt. Use it to calculate exact days until expiration and to generate specific calendar dates for check-ins.
+The user message states today's date in ISO form (YYYY-MM-DD). Use it with each position's expiration to reason carefully about calendar time left and time decay (theta): nearer expiry and opposing directional moves matter more for short-dated options.
 
-MOST IMPORTANT RULE — ALWAYS CHECK CURRENT P&L FIRST:
-Before doing anything else, look at the current P&L percentage provided for each position. This is the most important input.
-- If current P&L is already at or above 40%: The trader has already hit their minimum target. Lead your summary with this fact. Make the case for taking profit now vs holding for more. Be direct — "You are already up X% which meets your minimum target."
-- If current P&L is already at or above 60%: The trader has exceeded their target. Strongly recommend considering a sell. The risk of giving back gains outweighs chasing more upside. Recommend "Consider Selling" or "Sell Now" unless there is an exceptionally strong reason to hold.
-- If current P&L is between 20-40%: Good progress. Hold but tighten your mental stop. Do not let a winner turn into a loser.
-- If current P&L is below 20%: Position has not moved meaningfully yet. Evaluate whether the thesis is still intact and whether there is enough time left.
-- If current P&L is negative: Assess whether the thesis is broken or just needs more time. Flag urgency based on days remaining.
+Output rules:
+- original_thesis: short string pulling the key points from ai_thesis (not the full paste unless it is already brief).
+- thesis_still_valid: true only if the core trade logic from the thesis still holds given current_price vs entry_price and time remaining.
+- thesis_update: concrete commentary on what changed or was confirmed since entry—premium movement, decay vs plan, catalysts or levels mentioned in the thesis.
+- original_target_exit / original_stop_loss: extract from ai_thesis when explicit; if only implied, infer briefly and note that you inferred.
+- updated_target_exit / updated_stop_loss: revise for current conditions and time left.
+- time_remaining_note: compare time left to what the thesis implied for holding horizon (if unstated, say so) and what that implies for decay risk.
+- what_to_watch: the 1–2 most important monitors now (levels, events, IV, underlying behavior).
+- action: "Hold" | "Consider Selling" | "Sell Now" — include Sell Now or Consider Selling when thesis is broken, decay dominates, or risk/reward no longer favors holding.
+- confidence: "High" | "Medium" | "Low".
+- reasoning: exactly 2–3 sentences of plain English explaining the recommendation.
 
-CRITICAL RULES FOR EXIT TARGETS:
-- Always calculate the baseline exit target from the actual entry price. Example: entry $2.05, targeting 50% gain = exit at $3.08/share ($308/contract).
-- Then reason about whether current conditions justify revising that target up or down.
-- If the target has changed from what the original thesis implied, show the previous target and the new target and explain why in one sentence.
-- If nothing material has changed, say: "No change — target remains $X.XX/share ($XXX/contract). Thesis intact."
-- Always include both the per-share price AND the per-contract dollar amount in parentheses.
-- If the trader is already past the minimum target, also show what the current profit is in dollar terms so they can see exactly what they would be locking in.
+Numeric echoes: Use the provided entry_price for entry_price in output. For current_price, echo the provided current_price when it is a number; when current_price is null (no live quote), output null for current_price and null for pnl_percent. When both entry_price and current_price are numbers, set pnl_percent to the percentage gain or loss on premium: round sensibly (e.g. nearest integer) from ((current_price - entry_price) / entry_price) * 100.
 
-CRITICAL RULES FOR CHECK-IN DATES:
-- Provide exactly 3 specific calendar dates (e.g. "April 24") with a one-line reason for each.
-- Always include a must-exit date set to 3 days before expiration to avoid theta decay acceleration. Label it clearly as "MUST EXIT by".
-- The other 2 dates should be tied to real upcoming events: Fed meetings, earnings, economic data releases, or key technical levels. If no known events, use logical time-based checkpoints.
-- Never use vague language like "next week" or "soon". Always use specific dates.
-
-Return ONLY a JSON array where each item has exactly this shape:
+Return ONLY a JSON array with one object per input position, in the same order. Each object must have exactly these keys:
 {
-  "ticker": "NVDA",
-  "type": "Call",
-  "strike": 205,
-  "recommendation": "Hold" | "Consider Selling" | "Sell Now" | "Already Expired",
-  "urgency": "Low" | "Medium" | "High",
-  "summary": "2-3 sentences. ALWAYS start by stating the current P&L percentage and whether it has hit the minimum target. Then give your recommendation reasoning.",
-  "exitTarget": {
-    "previousTarget": "$3.08/share ($308/contract)",
-    "currentTarget": "$3.50/share ($350/contract)",
-    "changed": true,
-    "reason": "Already past minimum 40% target — locking in $105/contract profit now is a valid decision vs holding for more."
-  },
-  "checkInDates": [
-    { "date": "April 24", "reason": "Fed speaker at 2pm EST — could move QQQ and tech names significantly." },
-    { "date": "April 29", "reason": "Halfway to expiry — reassess if position has not moved at least 20%." },
-    { "date": "May 5", "reason": "MUST EXIT by this date — 3 days before May 8 expiry to avoid theta decay acceleration." }
-  ],
-  "redFlags": "Any new risks that were not present when the trade was entered. If none say None."
+  "ticker": string,
+  "action": "Hold" | "Consider Selling" | "Sell Now",
+  "current_price": number | null,
+  "entry_price": number,
+  "pnl_percent": number | null,
+  "original_thesis": string,
+  "thesis_still_valid": boolean,
+  "thesis_update": string,
+  "original_target_exit": string,
+  "updated_target_exit": string,
+  "original_stop_loss": string,
+  "updated_stop_loss": string,
+  "time_remaining_note": string,
+  "what_to_watch": string,
+  "confidence": "High" | "Medium" | "Low",
+  "reasoning": string
 }
 
-Return only the JSON array, with no additional sections before or after.`;
+Return only the JSON array with no text before or after.`;
 
 const SCORE_SYSTEM = `You are scoring current trade quality for open options positions.
 
@@ -89,13 +79,6 @@ export async function POST(request: Request) {
   if (!positions || positions.length === 0) {
     return NextResponse.json({ error: "No positions provided" }, { status: 400 });
   }
-
-  const today = new Date().toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
 
   // Build OCC symbols and fetch live option premiums from Tradier
   const debugSymbols = positions.map((p) => {
@@ -167,68 +150,39 @@ export async function POST(request: Request) {
     }
   }
 
-  const positionIds = positions.map((p) => String(p.id ?? "")).filter(Boolean);
+  const reportDateIso = new Date().toISOString().split("T")[0];
 
-  const prompt = `Today is ${today}.
-
-Here are the trader's open positions with their original AI trade plans:
-
-${positions
-  .map((p, i) => {
-    const entryPrice = Number(p.entry_price);
-    const ticker = String(p.ticker ?? "").trim().toUpperCase();
+  const positionsForReport = positions.map((p, i) => {
     const occSymbol = occSymbols[i];
-    const liveCurrentPrice = livePrice.get(occSymbol) ?? null;
-    const currentPrice = liveCurrentPrice ?? (p.current_price ? Number(p.current_price) : null);
-    const hasCurrent = currentPrice !== null && Number.isFinite(currentPrice) && currentPrice > 0;
-    const pnlPct = hasCurrent && entryPrice > 0
-      ? Math.round(((currentPrice - entryPrice) / entryPrice) * 100)
-      : null;
-    const pnlDollar = hasCurrent
-      ? Math.round((currentPrice - entryPrice) * Number(p.quantity) * 100)
-      : null;
-    const daysToExpiry = p.expiration
-      ? Math.ceil(
-          (new Date(p.expiration as string).getTime() - new Date().getTime()) /
-            (1000 * 60 * 60 * 24)
-        )
-      : null;
+    const live = livePrice.get(occSymbol);
+    const currentPrice =
+      live !== undefined && Number.isFinite(live) && live > 0 ? live : null;
 
-    return `
-Position ${i + 1}:
-- ID: ${String(p.id ?? "")}
-- Ticker: ${ticker}
-- Option Type: ${String(p.type ?? "Unknown")}
-- Strike Price: $${Number(p.strike)}
-- Expiration: ${String(p.expiration ?? "Unknown")}
-- OCC Symbol: ${occSymbol}
-- Entry Price: $${p.entry_price}/share (${p.quantity} contract(s) = $${entryPrice * Number(p.quantity) * 100} total cost)
-- Current Option Premium (live from Tradier): ${hasCurrent ? "$" + currentPrice.toFixed(2) + "/share" : "Not available — Tradier may not have a quote yet"}
-- Current P&L Percent: ${pnlPct !== null ? pnlPct + "%" : "Unknown"}
-- Current P&L: ${pnlPct !== null ? pnlPct + "% (" + (pnlDollar! >= 0 ? "+" : "") + "$" + pnlDollar + " total)" : "Unknown"}
-- Has hit 40% minimum target: ${pnlPct !== null ? (pnlPct >= 40 ? "YES — already at or past minimum exit target" : "No — not yet at 40% minimum") : "Unknown"}
-- Has hit 60% maximum target: ${pnlPct !== null ? (pnlPct >= 60 ? "YES — already exceeded maximum target, strongly consider selling" : "No") : "Unknown"}
-- Days until expiration: ${daysToExpiry ?? "Unknown"}
-- Original Signal Score: ${p.signal_score ?? "Unknown"}/100
-- Original AI Thesis: ${p.ai_thesis ?? "No thesis recorded"}
-- Date entered: ${p.created_at ? new Date(p.created_at as string | number | Date).toLocaleDateString() : "Unknown"}
-`;
-  })
-  .join("\n")}
+    return {
+      ticker: String(p.ticker ?? "").trim().toUpperCase(),
+      type: String(p.type ?? ""),
+      strike: Number(p.strike),
+      expiration: String(p.expiration ?? ""),
+      entry_price: Number(p.entry_price),
+      current_price: currentPrice,
+      ai_thesis: String(p.ai_thesis ?? ""),
+      signal_score: p.signal_score ?? null,
+    };
+  });
 
-For each position:
-1. Calculate the baseline exit target from the entry price (assume 40-60% gain target unless the original thesis specified otherwise)
-2. Use the live Tradier option premium to assess current P&L and whether the trader should act now
-3. If no live price is available, reason from time remaining, thesis strength, and signal score
-4. Provide 3 specific check-in dates anchored to real calendar events or expiry math
-5. Give your honest recommendation
+  const prompt = `Today's date is ${reportDateIso} (ISO YYYY-MM-DD). Reason carefully about time decay relative to each position's expiration given this date.
 
-Return only the JSON array with no extra text.`;
+Perform a full thesis-vs-reality situation update for each position below. Contract identity, entry premium, saved thesis text, and original signal score are inputs. current_price is the live option premium from Tradier when present; when null, no usable quote was available—inference should lean on thesis, time to expiration, and signal_score.
+
+Positions (JSON array, preserve order):
+${JSON.stringify(positionsForReport, null, 2)}
+
+Return only the JSON array in the exact schema from your system instructions—one object per position in the same order.`;
 
   try {
     const response = await anthropic.messages.create({
       model: "claude-sonnet-4-5",
-      max_tokens: 2048,
+      max_tokens: 4096,
       system: REPORT_SYSTEM,
       messages: [{ role: "user", content: prompt }],
     });
